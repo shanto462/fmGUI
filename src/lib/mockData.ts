@@ -17,7 +17,7 @@ import type {
 // ---------- small helpers ----------
 
 export const HOME = "/Users/ada";
-export const DATA_DIR = `${HOME}/Library/Application Support/dev.local.fmgui`;
+export const DATA_DIR = `${HOME}/Library/Application Support/io.shanto.fmgui`;
 export const SESSIONS_DIR = `${HOME}/.fm/sessions`;
 
 export const MINUTE = 60_000;

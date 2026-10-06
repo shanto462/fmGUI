@@ -7,7 +7,7 @@ use std::sync::RwLock;
 /// All folders and files the app uses.
 #[derive(Debug, Clone)]
 pub struct Paths {
-    /// `~/Library/Application Support/dev.local.fmgui`
+    /// `~/Library/Application Support/io.shanto.fmgui`
     pub data_dir: PathBuf,
     /// `<data>/config.json`
     pub config_file: PathBuf,
