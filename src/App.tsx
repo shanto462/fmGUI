@@ -2,6 +2,7 @@
 // Views live in src/views/<Name>View.tsx; each view agent owns its own file(s).
 
 import {
+  Lock,
   BookOpen,
   Boxes,
   Braces,
@@ -20,7 +21,7 @@ import {
 import { useEffect, type ReactNode } from "react";
 import { Toasts, StatusDot, cx } from "./components/ui";
 import { errorMessage, isTauri } from "./lib/api";
-import { useApp, type Route } from "./lib/store";
+import { isLocked, useApp, type Route } from "./lib/store";
 import ChatView from "./views/ChatView";
 import DocsView from "./views/DocsView";
 import McpView from "./views/McpView";
@@ -119,6 +120,8 @@ export default function App() {
   const load = useApp((s) => s.load);
   const toast = useApp((s) => s.toast);
   const config = useApp((s) => s.config);
+  const status = useApp((s) => s.status);
+  const loaded = useApp((s) => s.loaded);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -137,16 +140,25 @@ export default function App() {
           {NAV.map((group, i) => (
             <div key={i} className="sidebar__group">
               {group.title && <div className="sidebar__group-title">{group.title}</div>}
-              {group.items.map((item) => (
-                <button
-                  key={item.route}
-                  className={cx("sidebar__item", route === item.route && "sidebar__item--active")}
-                  onClick={() => navigate(item.route)}
-                >
-                  {item.icon}
-                  <span>{item.label}</span>
-                </button>
-              ))}
+              {group.items.map((item) => {
+                const locked = loaded && isLocked(item.route, config, status);
+                return (
+                  <button
+                    key={item.route}
+                    className={cx(
+                      "sidebar__item",
+                      route === item.route && "sidebar__item--active",
+                      locked && "sidebar__item--locked",
+                    )}
+                    title={locked ? "Finish the setup to open this page" : undefined}
+                    onClick={() => navigate(item.route)}
+                  >
+                    {item.icon}
+                    <span>{item.label}</span>
+                    {locked && <Lock size={12} className="sidebar__lock" />}
+                  </button>
+                );
+              })}
             </div>
           ))}
         </nav>
@@ -161,7 +173,9 @@ export default function App() {
           </button>
         </div>
       </aside>
-      <main className="content">{config ? VIEWS[route]() : <div className="empty"><Boxes size={28} />Loading…</div>}</main>
+      <main className="content">
+        {loaded ? VIEWS[route]() : <div className="empty"><Boxes size={28} />Checking fm…</div>}
+      </main>
       <Toasts />
     </div>
   );

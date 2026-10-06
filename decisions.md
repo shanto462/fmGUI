@@ -14,6 +14,8 @@ Format: date · who · decision · why.
 7. 2026-10-06 · "Git initialized and committed with init, it has local git config, commit after each step respecting local git config."
 8. 2026-10-06 · "Can you delete electronjs files?" (Answer: none exist; Electron was never scaffolded.)
 9. 2026-10-06 · "Aren't we using Rust? From npm came?" Then: "Keep current setup, continue."
+10. 2026-10-06 · "Progress?"
+11. 2026-10-06 · "For first run when setup not complete, other screens should be disabled? Only when all things are okay, show other screens, otherwise jump to setup?"
 
 ## Decisions
 
@@ -41,3 +43,5 @@ Format: date · who · decision · why.
 | D20 | 2026-10-06 | Claude | Tool router requests use `temperature: 0`; every object in a router schema (also inside `$defs`) carries `type`, `title`, `properties`, `required`, `x-order`, `additionalProperties`; scalar schemas never carry `title`; `pattern` is dropped. | Docs agent measured 35/40 correct with default sampling vs 11/11 with temperature 0. Missing keys or a scalar `title` make fm fail; `pattern` gives HTTP 500. |
 | D21 | 2026-10-06 | Claude | The docs do not copy the full license text. The app shows the live output of `fm license --show` instead. | Copyright caution, and the terms can change with macOS updates. |
 | D22 | 2026-10-06 | Claude | The UI never calls `fm serve` from the webview. All server traffic goes through Rust. | `fm serve` answers HTTP 403 to browser/webview POSTs (`Sec-Fetch-Site` same-site or cross-site), including `tauri://localhost`. |
+| D23 | 2026-10-06 | Claude (engine agent) | The router only decides (`{"answer": {}}` or a tool call); the answer is then a separate plain-text streaming request. Stop or a stalled stream restarts the private server. | Answers inside guided JSON arrived as one chunk, flattened Markdown lists, and once generated without end at temperature 0, blocking the model. `fm serve` keeps generating after a client disconnects, so a restart is the only way to free the model. Costs about 1 s per turn. |
+| D24 | 2026-10-06 | User | Pages are locked until setup is complete AND fm is found, the model is available and the license is agreed. Locked pages show a lock and send you to Setup. Setup, Docs and Settings always stay open (they help fix problems). If a check fails later, the open page jumps back to Setup. | User request #11. |

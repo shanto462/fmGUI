@@ -151,6 +151,16 @@ a:hover {
   font-weight: 500;
 }
 
+.sidebar__item--locked > svg:first-child,
+.sidebar__item--locked > span {
+  opacity: 0.45;
+}
+
+.sidebar__lock {
+  margin-left: auto;
+  color: var(--label-3) !important;
+}
+
 .sidebar__item .badge {
   margin-left: auto;
 }

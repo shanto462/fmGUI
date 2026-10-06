@@ -46,6 +46,8 @@ interface AppStore {
   status: FmStatus | null;
   paths: PathsInfo | null;
   statusLoading: boolean;
+  /** True after the first config + status load. */
+  loaded: boolean;
   toasts: Toast[];
 
   navigate: (route: Route, handoff?: Handoff) => void;
@@ -56,6 +58,19 @@ interface AppStore {
   updateConfig: (change: (draft: AppConfig) => AppConfig | void) => Promise<AppConfig | null>;
   toast: (text: string, kind?: Toast["kind"]) => void;
   dismissToast: (id: string) => void;
+}
+
+/** Pages that stay open before setup is done, because they help fix problems. */
+export const OPEN_ROUTES: ReadonlySet<Route> = new Set<Route>(["setup", "docs", "settings"]);
+
+/** True when setup is finished and fm, the model and the license are all OK. */
+export function isReady(config: AppConfig | null, status: FmStatus | null): boolean {
+  return !!config?.setupCompleted && !!status?.binaryFound && !!status.modelAvailable && !!status.licenseAgreed;
+}
+
+/** A page is locked until the app is ready (see decisions.md D24). */
+export function isLocked(route: Route, config: AppConfig | null, status: FmStatus | null): boolean {
+  return !OPEN_ROUTES.has(route) && !isReady(config, status);
 }
 
 // Rust emits "config-changed" after every save, including saves the engine
@@ -69,9 +84,18 @@ export const useApp = create<AppStore>((set, get) => ({
   status: null,
   paths: null,
   statusLoading: false,
+  loaded: false,
   toasts: [],
 
-  navigate: (route, handoff = {}) => set({ route, handoff }),
+  navigate: (route, handoff = {}) => {
+    const { config, status, loaded } = get();
+    if (loaded && isLocked(route, config, status)) {
+      set({ route: "setup", handoff: {} });
+      get().toast("Finish the setup first. Other pages open when fm, the model and the license are ready.");
+      return;
+    }
+    set({ route, handoff });
+  },
 
   takeHandoff: () => {
     const h = get().handoff;
@@ -81,9 +105,13 @@ export const useApp = create<AppStore>((set, get) => ({
 
   load: async () => {
     const [config, paths] = await Promise.all([api.getConfig(), api.getPaths()]);
-    set({ config, paths, route: config.setupCompleted ? "overview" : "setup" });
-    configListener ??= listen<AppConfig>("config-changed", (e) => set({ config: e.payload }));
-    await get().refreshStatus();
+    set({ config, paths });
+    configListener ??= listen<AppConfig>("config-changed", (e) => {
+      set({ config: e.payload });
+      guard();
+    });
+    const status = await get().refreshStatus();
+    set({ loaded: true, route: isReady(config, status) ? "overview" : "setup" });
   },
 
   refreshStatus: async () => {
@@ -91,6 +119,7 @@ export const useApp = create<AppStore>((set, get) => ({
     try {
       const status = await api.fmStatus();
       set({ status });
+      guard();
       return status;
     } catch (err) {
       get().toast(api.errorMessage(err), "error");
@@ -108,6 +137,7 @@ export const useApp = create<AppStore>((set, get) => ({
     try {
       const saved = await api.saveConfig(next);
       set({ config: saved });
+      guard();
       return saved;
     } catch (err) {
       get().toast(api.errorMessage(err), "error");
@@ -123,3 +153,10 @@ export const useApp = create<AppStore>((set, get) => ({
 
   dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),
 }));
+
+/** Sends the user to Setup when the open page becomes locked (for example the
+ *  license check fails later, or "Run setup again" was pressed). */
+function guard() {
+  const s = useApp.getState();
+  if (s.loaded && isLocked(s.route, s.config, s.status)) useApp.setState({ route: "setup", handoff: {} });
+}
