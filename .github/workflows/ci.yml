@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web (types, lint, format, tests, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: ESLint
+        run: npx eslint .
+
+      - name: Prettier
+        run: npx prettier --check .
+
+      - name: Unit tests (Vitest)
+        run: npm test
+
+      - name: Build the UI
+        run: npx vite build
+
+  rust:
+    name: Rust (fmt, clippy, tests)
+    runs-on: macos-latest
+    env:
+      CARGO_TERM_COLOR: always
+      # The app targets macOS 27 (src-tauri/.cargo/config.toml), but CI runners
+      # have an older SDK. Cargo's [env] table never overrides a variable that
+      # is already set, so this value wins.
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Tauri looks for the frontend folder (frontendDist = ../dist). Debug
+      # builds do not embed it, but an empty folder keeps the build happy.
+      - name: Create an empty frontend folder
+        run: mkdir -p ../dist
+
+      - name: rustfmt
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # Unit tests only. The integration tests against the real fm
+      # (FM_INTEGRATION=1) need macOS 27, Apple Intelligence, the downloaded
+      # model and an accepted license, which CI runners do not have. They skip
+      # themselves here. Run them on a Mac with `npm run test:integration`.
+      - name: Tests
+        run: cargo test

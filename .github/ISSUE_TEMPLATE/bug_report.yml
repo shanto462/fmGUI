@@ -1,0 +1,110 @@
+name: Bug report
+description: Something in fmGUI does not work as expected.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. Please check the [troubleshooting table](https://github.com/shanto462/fmGUI#troubleshooting) first.
+
+        Do not paste personal data, API keys or tokens. For a security problem, use the [private report form](https://github.com/shanto462/fmGUI/security/advisories/new) instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: fmGUI version
+      description: The release you installed, or the commit if you built it yourself.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: Run `sw_vers` in Terminal.
+      placeholder: "macOS 27.0.1 (26A434)"
+    validations:
+      required: true
+
+  - type: input
+    id: chip
+    attributes:
+      label: Chip
+      description: Apple menu → About This Mac.
+      placeholder: "Apple M2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: fm-status
+    attributes:
+      label: Output of `fm available` and `fm license --status`
+      description: Run both commands in Terminal and paste what they print.
+      placeholder: |
+        $ fm available
+        System model available
+        $ fm license --status
+        Agreed to license FM1 version 1.0 on ...
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+      multiple: true
+      options:
+        - Setup Guide
+        - Overview
+        - Chat
+        - Tools (built-in or custom)
+        - MCP servers
+        - Skills
+        - CLI Sessions
+        - Playground
+        - Schema Builder
+        - Token Counter
+        - API Server
+        - Docs
+        - Settings
+        - Install or build
+        - Other
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do? Start from opening the app.
+      placeholder: |
+        1. Open Chat and start a new chat.
+        2. Type "What is 2 + 2?".
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+      description: What happened instead? Screenshots help.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and error messages
+      description: |
+        Error messages from the app, the last lines an MCP server printed (MCP Servers page → details), or the `fm ...` command shown in the app and its output in Terminal.
+      render: text

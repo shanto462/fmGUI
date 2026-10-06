@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/shanto462/fmGUI/security/advisories/new
+    about: Please report security problems privately, not in a public issue.
+  - name: Problems with Apple's fm tool or the model
+    url: https://feedbackassistant.apple.com
+    about: Bugs in fm itself (not in fmGUI) go to Apple through Feedback Assistant.

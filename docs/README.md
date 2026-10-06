@@ -1,10 +1,19 @@
 # fm documentation
 
-Documentation for Apple's `fm` command-line tool (Apple Foundation Models CLI) in macOS 27.
+Documentation for Apple's `fm` command-line tool (Apple Foundation Models CLI) in macOS 27, and user guides for fmGUI.
 
 Checked on macOS 27.0.1 (build 26A434), Apple M4 Pro, on 2026-10-06. Anything not tested on this Mac is marked "(unverified)" with its source.
 
-## Pages
+## fmGUI guides
+
+| Page | What is in it |
+|------|---------------|
+| [12 Getting started](12-getting-started.md) | Install, the Setup Guide, your first chat, approvals, the context window, where data is stored. |
+| [13 Custom tools](13-custom-tools.md) | Shell, HTTP and Shortcut tools step by step: `FM_ARG_` variables, `{{param}}` placeholders, approvals, good descriptions, three examples. |
+| [14 MCP servers](14-mcp-servers.md) | Add MCP servers with the wizard: templates, stdio vs Streamable HTTP, `npx` and `uvx`, per-tool switches and context cost, troubleshooting. |
+| [15 Skills](15-skills.md) | The `SKILL.md` format, the three modes, how `use_skill` works, importing from `~/.claude/skills`, two example skills. |
+
+## fm pages
 
 | Page | What is in it |
 |------|---------------|
