@@ -68,7 +68,7 @@ export function isReady(config: AppConfig | null, status: FmStatus | null): bool
   return !!config?.setupCompleted && !!status?.binaryFound && !!status.modelAvailable && !!status.licenseAgreed;
 }
 
-/** A page is locked until the app is ready (see decisions.md D24). */
+/** A page is locked until the app is ready. */
 export function isLocked(route: Route, config: AppConfig | null, status: FmStatus | null): boolean {
   return !OPEN_ROUTES.has(route) && !isReady(config, status);
 }

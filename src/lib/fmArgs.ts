@@ -1,5 +1,5 @@
 // CONTRACT FILE (owned by the lead). Builds `fm` argument lists from UI state.
-// Every flag here was tested against /usr/bin/fm on macOS 27.0.1 (see decisions.md).
+// Every flag here was tested against /usr/bin/fm on macOS 27.0.1.
 
 export type UseCase = "general" | "content-tagging";
 export type Guardrails = "default" | "permissive-content-transformations";
