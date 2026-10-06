@@ -1,8 +1,14 @@
-//! User-defined tools (decisions.md D9): shell command, HTTP request, Apple
-//! Shortcut. Model arguments are never spliced into a shell command.
-//! OWNER: agent "engine".
+//! User-defined tools: shell command, HTTP request, Apple Shortcut.
+//!
+//! Model arguments are never spliced into a shell command: a shell tool gets
+//! them as `FM_ARG_<NAME>` environment variables and as JSON on stdin, so
+//! text like `$(rm -rf ~)` stays plain text. HTTP placeholders are escaped
+//! for the place they go (URL, JSON, form body).
 
-use super::builtin::{body_to_text, describe_output, describe_reqwest_error, expand_tilde, http_client, read_limited, run_shortcut, shell_command};
+use super::builtin::{
+    body_to_text, describe_output, describe_reqwest_error, expand_tilde, http_client, read_limited, run_shortcut,
+    shell_command,
+};
 use super::process::run_process;
 use crate::config::{CustomTool, CustomToolKind};
 use serde_json::Value;
@@ -50,7 +56,8 @@ pub fn value_text(v: &Value) -> String {
 
 /// `order_id` → `FM_ARG_ORDER_ID`.
 pub fn env_name(param: &str) -> String {
-    let upper: String = param.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_uppercase() } else { '_' }).collect();
+    let upper: String =
+        param.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_uppercase() } else { '_' }).collect();
     format!("FM_ARG_{upper}")
 }
 
@@ -90,14 +97,14 @@ pub enum Escape {
 /// become empty text.
 pub fn fill_template(template: &str, args: &Value, escape: Escape) -> String {
     static RE: OnceLock<regex::Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| regex::Regex::new(r"\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}").unwrap());
+    let re = RE.get_or_init(|| regex::Regex::new(r"\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}").expect("valid regex"));
     re.replace_all(template, |caps: &regex::Captures| {
         let value = args.get(&caps[1]).map(value_text).unwrap_or_default();
         match escape {
             Escape::Url => percent_encode(&value),
             Escape::Json => {
                 let quoted = serde_json::to_string(&value).unwrap_or_default();
-                quoted[1..quoted.len() - 1].to_string()
+                quoted.strip_prefix('"').and_then(|q| q.strip_suffix('"')).unwrap_or_default().to_string()
             }
             Escape::Raw => value,
         }
@@ -140,18 +147,33 @@ pub async fn run_http(
         .map_err(|_| format!("\"{method}\" is not a valid HTTP method."))?;
     let client = http_client(timeout)?;
     let mut req = client.request(method, parsed);
-    let mut has_content_type = false;
+    let mut content_type: Option<String> = None;
     for (key, value) in headers {
         let key = key.trim();
         if key.is_empty() {
             continue;
         }
-        has_content_type |= key.eq_ignore_ascii_case("content-type");
-        req = req.header(key, fill_template(value, args, Escape::Raw));
+        // Header values with line breaks are refused by the HTTP library,
+        // so a placeholder cannot add headers.
+        let value = fill_template(value, args, Escape::Raw);
+        if key.eq_ignore_ascii_case("content-type") {
+            content_type = Some(value.to_ascii_lowercase());
+        }
+        req = req.header(key, value);
     }
+    let has_content_type = content_type.is_some();
     if let Some(body) = body.filter(|b| !b.trim().is_empty()) {
         let json = body_is_json(body);
-        let filled = fill_template(body, args, if json { Escape::Json } else { Escape::Raw });
+        let form = content_type.as_deref().is_some_and(|ct| ct.contains("x-www-form-urlencoded"));
+        // Escape for the place the value goes, so `a&admin=1` stays one value.
+        let escape = if json {
+            Escape::Json
+        } else if form {
+            Escape::Url
+        } else {
+            Escape::Raw
+        };
+        let filled = fill_template(body, args, escape);
         if json && !has_content_type {
             req = req.header("content-type", "application/json");
         }
@@ -196,7 +218,12 @@ mod tests {
             id: "t1".into(),
             name: "lookup_order".into(),
             description: "Look up an order".into(),
-            params: vec![ToolParam { name: "order_id".into(), kind: ParamType::String, description: String::new(), required: true }],
+            params: vec![ToolParam {
+                name: "order_id".into(),
+                kind: ParamType::String,
+                description: String::new(),
+                required: true,
+            }],
             kind: CustomToolKind::Shell { command: command.into(), cwd: None, timeout_secs: 10 },
             enabled: true,
             approval: Approval::Always,
@@ -206,13 +233,28 @@ mod tests {
     #[test]
     fn templates_escape_per_place() {
         let args = json!({"q": "a b&c/é", "n": 3, "quote": "say \"hi\"\n"});
-        assert_eq!(fill_template("https://x.test/s?q={{q}}&n={{ n }}", &args, Escape::Url), "https://x.test/s?q=a%20b%26c%2F%C3%A9&n=3");
+        assert_eq!(
+            fill_template("https://x.test/s?q={{q}}&n={{ n }}", &args, Escape::Url),
+            "https://x.test/s?q=a%20b%26c%2F%C3%A9&n=3"
+        );
         assert_eq!(fill_template("Bearer {{q}}", &args, Escape::Raw), "Bearer a b&c/é");
-        assert_eq!(fill_template(r#"{"text": "{{quote}}", "n": {{n}}}"#, &args, Escape::Json), r#"{"text": "say \"hi\"\n", "n": 3}"#);
+        assert_eq!(
+            fill_template(r#"{"text": "{{quote}}", "n": {{n}}}"#, &args, Escape::Json),
+            r#"{"text": "say \"hi\"\n", "n": 3}"#
+        );
         assert_eq!(fill_template("x={{missing}}", &args, Escape::Raw), "x=");
         assert!(body_is_json("  {\"a\": 1}"));
         assert!(body_is_json("[1]"));
         assert!(!body_is_json("a={{q}}"));
+        // JSON values cannot break out of their string or add keys.
+        let evil = json!({"v": "x\", \"admin\": true, \"y\": \""});
+        let body = fill_template(r#"{"name": "{{v}}"}"#, &evil, Escape::Json);
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed.as_object().unwrap().len(), 1);
+        assert_eq!(parsed["name"], evil["v"]);
+        // URL values cannot add path parts, query parameters or fragments.
+        let evil = json!({"v": "../admin?x=1&y=2#z /\r\n"});
+        assert_eq!(fill_template("{{v}}", &evil, Escape::Url), "..%2Fadmin%3Fx%3D1%26y%3D2%23z%20%2F%0D%0A");
     }
 
     #[test]
@@ -251,7 +293,10 @@ mod tests {
         assert_eq!(shortcut_input(&tool, &json!({"order_id": "A-1"})).as_deref(), Some("A-1"));
         assert_eq!(shortcut_input(&tool, &json!({})), None);
         tool.params.push(ToolParam { name: "b".into(), ..Default::default() });
-        assert_eq!(shortcut_input(&tool, &json!({"order_id": "A-1", "b": 2})).as_deref(), Some(r#"{"b":2,"order_id":"A-1"}"#));
+        assert_eq!(
+            shortcut_input(&tool, &json!({"order_id": "A-1", "b": 2})).as_deref(),
+            Some(r#"{"b":2,"order_id":"A-1"}"#)
+        );
     }
 
     /// A tiny one-shot HTTP server on 127.0.0.1 for the HTTP tool test.
@@ -270,7 +315,11 @@ mod tests {
                 if let Some(head_end) = text.find("\r\n\r\n") {
                     let len = text
                         .lines()
-                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap()))
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse::<usize>().unwrap())
+                        })
                         .unwrap_or(0);
                     if req.len() >= head_end + 4 + len {
                         break;
@@ -309,6 +358,26 @@ mod tests {
         assert!(req.to_ascii_lowercase().contains("x-token: t-a 77\"81"), "{req}");
         assert!(req.to_ascii_lowercase().contains("content-type: application/json"), "{req}");
         assert!(req.ends_with(r#"{"id": "A 77\"81"}"#), "{req}");
+    }
+
+    #[tokio::test]
+    async fn http_tool_escapes_form_bodies_and_refuses_header_injection() {
+        let (base, handle) = serve_once(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+        )
+        .await;
+        let headers = [("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string())];
+        let args = json!({"q": "a&admin=1"});
+        run_http("POST", &base, &headers, Some("q={{q}}"), &args, Duration::from_secs(5)).await.unwrap();
+        let req = handle.await.unwrap();
+        assert!(req.ends_with("q=a%26admin%3D1"), "{req}");
+
+        // A line break in a header value is refused before anything is sent.
+        let headers = [("X-Token".to_string(), "{{t}}".to_string())];
+        let args = json!({"t": "ok\r\nX-Admin: 1"});
+        let err = run_http("GET", "http://127.0.0.1:9/", &headers, None, &args, Duration::from_secs(5)).await;
+        let err = err.unwrap_err();
+        assert!(err.starts_with("Request failed") && !err.contains("connect"), "{err}");
     }
 
     #[tokio::test]

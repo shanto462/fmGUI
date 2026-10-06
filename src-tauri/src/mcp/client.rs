@@ -1,11 +1,13 @@
-//! OWNER: agent "mcp". JSON-RPC client for stdio and Streamable HTTP. See mcp/mod.rs.
+//! JSON-RPC client for stdio and Streamable HTTP.
 //! One `McpClient` is one live connection: handshake, tools/list, tools/call.
 
 use super::http::HttpTransport;
 use super::rpc::{self, CallError, LogTail};
 use super::stdio::{StdioSpec, StdioTransport};
 use crate::config::{McpServerConfig, McpTransport};
+use crate::util::LockExt;
 use serde_json::{json, Value};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -85,10 +87,12 @@ pub struct McpClient {
 
 impl McpClient {
     /// Starts the transport (spawns the process for stdio). No handshake yet.
+    /// A stdio server records its process group in `pid_file` while it runs.
     pub async fn start(
         config: &McpServerConfig,
         tail: LogTail,
         events: mpsc::UnboundedSender<ClientEvent>,
+        pid_file: Option<PathBuf>,
     ) -> Result<Self, String> {
         let transport = match &config.transport {
             McpTransport::Stdio { command, args, env, cwd } => {
@@ -97,6 +101,7 @@ impl McpClient {
                     args: args.clone(),
                     env: env.iter().map(|kv| (kv.key.clone(), kv.value.clone())).collect(),
                     cwd: cwd.clone(),
+                    pid_file,
                 };
                 Transport::Stdio(StdioTransport::spawn(spec, tail.clone(), events).await?)
             }
@@ -114,7 +119,7 @@ impl McpClient {
     }
 
     pub fn info(&self) -> ServerInfo {
-        self.info.lock().unwrap().clone()
+        self.info.lock_safe().clone()
     }
 
     pub fn tail(&self) -> &LogTail {
@@ -138,8 +143,9 @@ impl McpClient {
         let result = self.raw_request("initialize", params, rpc::INITIALIZE_TIMEOUT).await?;
         let server = result.get("serverInfo");
         let text = |key: &str| server.and_then(|s| s.get(key)).and_then(Value::as_str).map(str::to_string);
-        let protocol = result.get("protocolVersion").and_then(Value::as_str).unwrap_or(rpc::PROTOCOL_VERSION).to_string();
-        *self.info.lock().unwrap() =
+        let protocol =
+            result.get("protocolVersion").and_then(Value::as_str).unwrap_or(rpc::PROTOCOL_VERSION).to_string();
+        *self.info.lock_safe() =
             ServerInfo { name: text("name"), version: text("version"), protocol_version: Some(protocol.clone()) };
         if let Transport::Http(http) = &self.transport {
             http.set_protocol_version(&protocol);
@@ -303,7 +309,8 @@ mod tests {
         assert_eq!(join_content(&result), "{\n  \"sum\": 5\n}");
         let with_text = json!({"content": [{"type": "text", "text": "5"}], "structuredContent": {"sum": 5}});
         assert_eq!(join_content(&with_text), "5");
-        let image_only = json!({"content": [{"type": "image", "mimeType": "image/jpeg"}], "structuredContent": {"ok": true}});
+        let image_only =
+            json!({"content": [{"type": "image", "mimeType": "image/jpeg"}], "structuredContent": {"ok": true}});
         assert_eq!(join_content(&image_only), "{\n  \"ok\": true\n}\n[image image/jpeg]");
         assert_eq!(join_content(&json!({})), "");
     }
@@ -312,7 +319,8 @@ mod tests {
     fn tool_defs_have_defaults() {
         let t = ToolDef::from_value(&json!({"name": "echo"})).unwrap();
         assert_eq!(t.input_schema, json!({"type": "object", "properties": {}}));
-        let t = ToolDef::from_value(&json!({"name": "x", "title": "X tool", "inputSchema": {"type": "object"}})).unwrap();
+        let t =
+            ToolDef::from_value(&json!({"name": "x", "title": "X tool", "inputSchema": {"type": "object"}})).unwrap();
         assert_eq!(t.description, "X tool");
         assert!(ToolDef::from_value(&json!({"description": "no name"})).is_none());
     }
@@ -322,7 +330,12 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let tail = LogTail::default();
         handle_notification("notifications/tools/list_changed", &Value::Null, &tail, &tx);
-        handle_notification("notifications/message", &json!({"level": "warning", "data": "disk almost full"}), &tail, &tx);
+        handle_notification(
+            "notifications/message",
+            &json!({"level": "warning", "data": "disk almost full"}),
+            &tail,
+            &tx,
+        );
         handle_notification("notifications/progress", &json!({}), &tail, &tx);
         assert_eq!(rx.try_recv().unwrap(), ClientEvent::ToolsChanged);
         assert!(rx.try_recv().is_err());

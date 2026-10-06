@@ -1,5 +1,7 @@
-//! Everything that runs the `fm` CLI directly.
-//! OWNER: agent "cli". Public items marked CONTRACT must keep their signatures.
+//! Everything that runs the `fm` CLI directly: one-shot runs with streamed
+//! output, status checks, CLI sessions, transcripts and the public server.
+//!
+//! Types that cross the IPC boundary are mirrored in `src/lib/types.ts`.
 
 pub mod commands;
 mod decode;
@@ -11,6 +13,7 @@ pub mod transcript;
 #[cfg(test)]
 mod integration_tests;
 
+use crate::util::LockExt;
 use decode::ChunkDecoder;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -20,7 +23,7 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 
-/// CONTRACT: streamed to the UI while `fm` runs (`fm_run` command channel).
+/// Streamed to the UI while `fm` runs (`fm_run` command channel).
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum RunEvent {
@@ -32,7 +35,7 @@ pub enum RunEvent {
     Stderr { text: String },
 }
 
-/// CONTRACT: result of one `fm` invocation.
+/// Result of one `fm` invocation.
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RunResult {
@@ -50,7 +53,7 @@ pub struct RunResult {
     pub cancelled: bool,
 }
 
-/// CONTRACT: cancellation tokens for running `fm` processes, keyed by run id.
+/// Cancellation tokens for running `fm` processes, keyed by run id.
 #[derive(Default)]
 pub struct RunRegistry {
     inner: Mutex<HashMap<String, CancellationToken>>,
@@ -59,12 +62,12 @@ pub struct RunRegistry {
 impl RunRegistry {
     pub fn register(&self, run_id: &str) -> CancellationToken {
         let token = CancellationToken::new();
-        self.inner.lock().unwrap().insert(run_id.to_string(), token.clone());
+        self.inner.lock_safe().insert(run_id.to_string(), token.clone());
         token
     }
 
     pub fn cancel(&self, run_id: &str) -> bool {
-        match self.inner.lock().unwrap().remove(run_id) {
+        match self.inner.lock_safe().remove(run_id) {
             Some(token) => {
                 token.cancel();
                 true
@@ -74,19 +77,15 @@ impl RunRegistry {
     }
 
     pub fn finish(&self, run_id: &str) {
-        self.inner.lock().unwrap().remove(run_id);
+        self.inner.lock_safe().remove(run_id);
     }
 }
 
-/// CONTRACT: the shell command shown to users, e.g. `fm respond -i 'Be brief' 'Hi'`.
+/// The shell command shown to users, e.g. `fm respond -i 'Be brief' 'Hi'`.
 /// Uses `fm` instead of the full path when the binary is `/usr/bin/fm`.
 pub fn display_command(fm_path: &str, args: &[String]) -> String {
     let exe = if fm_path == "/usr/bin/fm" { "fm" } else { fm_path };
-    std::iter::once(exe.to_string())
-        .chain(args.iter().cloned())
-        .map(|a| shell_quote(&a))
-        .collect::<Vec<_>>()
-        .join(" ")
+    std::iter::once(exe.to_string()).chain(args.iter().cloned()).map(|a| shell_quote(&a)).collect::<Vec<_>>().join(" ")
 }
 
 pub fn shell_quote(arg: &str) -> String {
@@ -94,8 +93,7 @@ pub fn shell_quote(arg: &str) -> String {
         return "''".into();
     }
     // A leading "=" is expanded by zsh (=cmd → path of cmd), so quote it.
-    let safe = !arg.starts_with('=')
-        && arg.chars().all(|c| c.is_ascii_alphanumeric() || "-_./=:,+@%".contains(c));
+    let safe = !arg.starts_with('=') && arg.chars().all(|c| c.is_ascii_alphanumeric() || "-_./=:,+@%".contains(c));
     if safe {
         arg.to_string()
     } else {
@@ -107,8 +105,7 @@ pub fn shell_quote(arg: &str) -> String {
 pub const EXIT_LICENSE: i32 = 69;
 
 /// Message shown when `fm` exits with code 69.
-pub const LICENSE_MESSAGE: &str =
-    "You have not agreed to the fm license yet. Run 'sudo fm license' in Terminal.";
+pub const LICENSE_MESSAGE: &str = "You have not agreed to the fm license yet. Run 'sudo fm license' in Terminal.";
 
 /// Environment added to every `fm` process. `fm` ignores NO_COLOR and TERM
 /// (harmless). `NSUnbufferedIO=YES` makes Foundation tools flush stdout on
@@ -168,7 +165,7 @@ pub(crate) async fn terminate(child: &mut tokio::process::Child, grace: Duration
     let _ = child.kill().await;
 }
 
-/// CONTRACT: run `fm` with `args`, streaming events, until it exits or `cancel` fires.
+/// Runs `fm` with `args`, streaming events, until it exits or `cancel` fires.
 /// stdin is /dev/null. Never fails for a non-zero exit: that is reported in RunResult.
 /// Returns Err only when the process cannot be started.
 pub async fn run_streaming(
@@ -191,8 +188,9 @@ pub async fn run_streaming(
 
     on_event(RunEvent::Started { command: command.clone() });
 
-    let mut out_pipe = child.stdout.take().expect("stdout is piped");
-    let mut err_pipe = child.stderr.take().expect("stderr is piped");
+    let (Some(mut out_pipe), Some(mut err_pipe)) = (child.stdout.take(), child.stderr.take()) else {
+        return Err("Could not read the output of fm.".into());
+    };
     let mut out_buf = vec![0u8; 8192];
     let mut err_buf = vec![0u8; 8192];
     let mut out_dec = ChunkDecoder::default();
@@ -279,9 +277,34 @@ pub async fn run_streaming(
     })
 }
 
-/// CONTRACT: run `fm` and collect all output (no streaming, no cancel).
+/// How long [`run_collect`] waits. It is used for quick commands (status,
+/// license text, token counts), never for long generations.
+pub const COLLECT_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Runs `fm` and collects all output (no streaming). Stops `fm` and fails
+/// after [`COLLECT_TIMEOUT`].
 pub async fn run_collect(fm_path: &str, args: &[String]) -> Result<RunResult, String> {
-    run_streaming(fm_path, args, CancellationToken::new(), |_| {}).await
+    run_collect_within(fm_path, args, COLLECT_TIMEOUT).await
+}
+
+/// [`run_collect`] with its own time limit.
+pub async fn run_collect_within(fm_path: &str, args: &[String], limit: Duration) -> Result<RunResult, String> {
+    let cancel = CancellationToken::new();
+    let timer = {
+        let cancel = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(limit).await;
+            cancel.cancel();
+        })
+    };
+    let result = run_streaming(fm_path, args, cancel, |_| {}).await;
+    let timed_out = timer.is_finished();
+    timer.abort();
+    let result = result?;
+    if result.cancelled && timed_out {
+        return Err(format!("fm did not finish within {} seconds and was stopped.", limit.as_secs()));
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -390,6 +413,16 @@ mod tests {
         assert_eq!(r.stdout, "done\n");
         assert_eq!(r.exit_code, 3);
         assert!(started.elapsed() < Duration::from_secs(3), "took {:?}", started.elapsed());
+    }
+
+    #[tokio::test]
+    async fn collect_has_a_time_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let fm = fake_fm(dir.path(), "exec sleep 30");
+        let started = Instant::now();
+        let err = run_collect_within(&fm, &[], Duration::from_millis(300)).await.unwrap_err();
+        assert!(err.contains("did not finish within"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[tokio::test]

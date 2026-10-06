@@ -1,6 +1,6 @@
 //! The tool catalog: built-in tools, custom tools (config), MCP tools
 //! (connected servers) and `use_skill`. Gives every tool a unique
-//! model-facing name and runs tools. OWNER: agent "engine".
+//! model-facing name and runs tools.
 
 use super::builtin::{self, Builtin, BuiltinEnv, BUILTINS};
 use super::{custom, schema, ToolInfo, ToolTestResult};
@@ -16,7 +16,9 @@ use std::time::{Duration, Instant};
 pub const MAX_NAME: usize = 48;
 /// Default limit for one tool result sent to the model.
 pub const DEFAULT_RESULT_CHARS: usize = 4000;
-const MCP_TIMEOUT: Duration = Duration::from_secs(60);
+/// The MCP client has its own 120 s limit for `tools/call` (with a clear
+/// message); this outer limit only catches a stuck transport.
+const MCP_TIMEOUT: Duration = Duration::from_secs(crate::mcp::rpc::CALL_TIMEOUT.as_secs() + 5);
 
 #[derive(Debug, Clone)]
 pub enum ToolKind {
@@ -276,7 +278,12 @@ pub async fn execute(state: &AppState, cfg: &AppConfig, tool: &CatalogTool, args
 }
 
 /// Runs with the tool's timeout.
-pub async fn execute_with_timeout(state: &AppState, cfg: &AppConfig, tool: &CatalogTool, args: &Value) -> Result<String, String> {
+pub async fn execute_with_timeout(
+    state: &AppState,
+    cfg: &AppConfig,
+    tool: &CatalogTool,
+    args: &Value,
+) -> Result<String, String> {
     let limit = tool.timeout();
     match tokio::time::timeout(limit, execute(state, cfg, tool, args)).await {
         Ok(result) => result,
@@ -324,7 +331,12 @@ mod tests {
             id: id.into(),
             name: name.into(),
             description: "Look up an order".into(),
-            params: vec![ToolParam { name: "order_id".into(), kind: ParamType::String, description: "Order id".into(), required: true }],
+            params: vec![ToolParam {
+                name: "order_id".into(),
+                kind: ParamType::String,
+                description: "Order id".into(),
+                required: true,
+            }],
             kind: CustomToolKind::Shell { command: "echo hi".into(), cwd: None, timeout_secs: 10 },
             enabled: true,
             approval: Approval::Ask,
@@ -387,7 +399,12 @@ mod tests {
             },
         ];
         let skills = vec![
-            Skill { name: "pdf-tips".into(), description: "PDF help".into(), body: "Use pdftotext.".into(), ..Default::default() },
+            Skill {
+                name: "pdf-tips".into(),
+                description: "PDF help".into(),
+                body: "Use pdftotext.".into(),
+                ..Default::default()
+            },
             Skill { name: "off-skill".into(), description: "Off".into(), body: "x".into(), ..Default::default() },
         ];
         let cat = build_catalog(&cfg, &mcp, &skills);

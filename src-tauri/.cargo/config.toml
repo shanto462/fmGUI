@@ -1,3 +1,5 @@
 # fmGUI targets macOS 27 or later only (Apple Silicon, /usr/bin/fm).
+# Not `force = true`: an environment variable (for example in CI, which runs
+# on older macOS) still wins over this value.
 [env]
 MACOSX_DEPLOYMENT_TARGET = "27.0"

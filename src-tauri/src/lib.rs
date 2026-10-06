@@ -1,11 +1,15 @@
 //! fmGUI: a desktop app for Apple's `fm` CLI (Foundation Models, macOS 27).
-//! OWNER: lead. Agents: register new commands here only through the lead.
+//!
+//! The Rust side runs every `fm` process, the private `fm serve` used by the
+//! agent engine, MCP servers and tools. The React UI (in `src/`) talks to it
+//! only through the Tauri commands registered below.
 
 mod app_commands;
 pub mod config;
 pub mod engine;
 pub mod fm;
 pub mod mcp;
+pub mod procs;
 pub mod skills;
 pub mod state;
 pub mod util;
@@ -14,15 +18,72 @@ pub mod util;
 compile_error!("fmGUI only supports macOS 27 or later: it drives Apple's /usr/bin/fm.");
 
 use state::{AppState, Paths};
-use tauri::{Manager, RunEvent};
+use std::time::Duration;
+use tauri::{AppHandle, Manager, RunEvent};
+
+/// Stops every child process the app owns: the private engine server, the
+/// public server and the MCP servers. Safe to call more than once.
+async fn stop_children(handle: &AppHandle) {
+    let Some(state) = handle.try_state::<AppState>() else { return };
+    state.engine.shutdown().await;
+    state.public_server.shutdown().await;
+    state.mcp.shutdown().await;
+}
+
+/// `kill <pid>`, Ctrl+C in a terminal, or a closed terminal: stop the
+/// children like a normal quit, then exit.
+fn exit_on_signals(handle: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        use tokio::signal::unix::{signal, SignalKind};
+        let (Ok(mut term), Ok(mut int), Ok(mut hup)) =
+            (signal(SignalKind::terminate()), signal(SignalKind::interrupt()), signal(SignalKind::hangup()))
+        else {
+            eprintln!("fmGUI: could not listen for quit signals");
+            return;
+        };
+        tokio::select! {
+            _ = term.recv() => {}
+            _ = int.recv() => {}
+            _ = hup.recv() => {}
+        }
+        stop_children(&handle).await;
+        handle.exit(0);
+        // Normally the line above ends the process. If the event loop is stuck,
+        // do not leave the user with an app that ignores the signal.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        std::process::exit(0);
+    });
+}
+
+/// A second launch of the app shows the running window instead.
+fn focus_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
 
 pub fn run() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
+        // First: a second instance must exit before it starts anything.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| focus_main_window(app)))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let data_dir = app.path().app_data_dir().expect("no app data dir");
-            app.manage(AppState::new(Paths::new(data_dir)));
+            let data_dir = app.path().app_data_dir()?;
+            let paths = Paths::new(data_dir);
+
+            // Children left by an earlier run that was killed (crash, Force
+            // Quit, `tauri dev` restart) are stopped before anything starts.
+            let fm_path = config::AppConfig::load(&paths.config_file).fm_path;
+            let stopped = AppState::leftovers(&paths, &fm_path).clean();
+            if stopped > 0 {
+                eprintln!("fmGUI: stopped {stopped} process(es) left over from an earlier run");
+            }
+
+            app.manage(AppState::new(paths));
+            exit_on_signals(app.handle().clone());
 
             // Warm the login-shell environment off the main thread (used by MCP + shell tools).
             std::thread::spawn(|| {
@@ -107,20 +168,19 @@ pub fn run() {
             skills::commands::skills_import_candidates,
             skills::commands::skill_import,
             skills::commands::skill_token_count,
-        ])
-        .build(tauri::generate_context!())
-        .expect("error while building fmGUI");
+        ]);
+
+    let app = match builder.build(tauri::generate_context!()) {
+        Ok(app) => app,
+        Err(err) => {
+            eprintln!("fmGUI could not start: {err}");
+            std::process::exit(1);
+        }
+    };
 
     app.run(|handle, event| {
         if let RunEvent::Exit = event {
-            // Stop every child process we own: private engine server, public
-            // server, MCP servers.
-            let state = handle.state::<AppState>();
-            tauri::async_runtime::block_on(async {
-                state.engine.shutdown().await;
-                state.public_server.shutdown().await;
-                state.mcp.shutdown().await;
-            });
+            tauri::async_runtime::block_on(stop_children(handle));
         }
     });
 }

@@ -1,9 +1,15 @@
-//! Guided-JSON tool router and the agent loop behind `chat_send`
-//! (decisions.md D5). `fm serve` never returns `tool_calls`, so every
-//! request with tools uses `response_format` with one `anyOf` branch per
-//! tool (`{"calculator": {"expression": "..."}}`) plus `{"answer": "..."}`.
+//! Guided-JSON tool router and the agent loop behind `chat_send`.
+//!
+//! Why: `fm serve` (macOS 27.0.1) accepts `tools` but never returns
+//! `tool_calls`; the model fakes results or prints the arguments as text, and
+//! `tool_choice: "required"` gives HTTP 500. So the app routes tools itself:
+//! every request with tools uses `response_format: json_schema` with one
+//! `anyOf` branch per tool (`{"calculator": {"expression": "..."}}`) plus
+//! `{"answer": {}}` ("I can answer now"). The answer is then a separate
+//! plain-text streaming request, because answers inside guided JSON arrive
+//! in one chunk at the end and lose their Markdown line breaks.
 //! Tool results go back as assistant `tool_calls` + role `tool` messages,
-//! which `fm serve` understands. OWNER: agent "engine".
+//! which `fm serve` understands.
 
 use super::chats::{self, NEW_CHAT_TITLE};
 use super::fm_client::{FmError, FmErrorKind};
@@ -29,7 +35,14 @@ pub const DENIED: &str = "The user did not allow this tool call.";
 /// Sent as a user message when the model answers a tool result with nothing.
 const NUDGE: &str = "Use the tool result above to answer my question.";
 /// When to use tools (generic: the tool list changes).
-const TOOL_POLICY: &str = "Use a tool when the answer needs exact math, the current date or time, data from this Mac, or a service the tools offer. Never do arithmetic in your head. Do not use tools for writing, chatting or general knowledge.";
+const TOOL_POLICY: &str = "Use a tool when the answer needs exact math, the current date or time, data from this Mac, or a service the tools offer. Never do arithmetic in your head. Do not use other tools for writing, chatting or general knowledge.";
+/// How on-demand skills are offered to the model.
+const SKILL_POLICY: &str = "When the request is about what a skill describes, load that skill first with {\"use_skill\": {\"name\": \"<skill name>\"}}. Never load a skill for other requests.";
+/// Tool result for `use_skill`: the skill text itself goes into the system
+/// instructions, where the small model follows it far more reliably.
+const SKILL_LOADED: &str = "is loaded. Its instructions are now part of your instructions. Follow them in your answer.";
+/// At most this many skills are loaded up front for one message.
+const MAX_AUTO_SKILLS: usize = 2;
 const TOOL_PROTOCOL: &str =
     "To use a tool reply with {\"tool_name\": {arguments}}. When you can answer without a tool, or you have what you need, reply with {\"answer\": {}}.";
 
@@ -244,10 +257,8 @@ pub fn parse_action(raw: &str) -> Action {
         Some(_) => return Action::Answer(String::new()),
         None => {}
     }
-    if obj.len() != 1 {
-        return Action::Invalid;
-    }
-    let (name, args) = obj.into_iter().next().unwrap();
+    let mut entries = obj.into_iter();
+    let (Some((name, args)), None) = (entries.next(), entries.next()) else { return Action::Invalid };
     let args = match args {
         Value::Object(_) => args,
         _ => json!({}),
@@ -268,26 +279,205 @@ fn base_instructions(chat_instructions: &str, always: &[&Skill]) -> String {
     text
 }
 
+/// The tool part of the router instructions. On-demand skills come first, in
+/// their own block: listed after many tools, the model ignored them.
 pub fn tool_guide(tools: &[CatalogTool], on_demand: &[&Skill]) -> String {
     if tools.is_empty() {
         return String::new();
     }
-    let mut text = String::from("You can use these tools:\n");
-    for t in tools {
-        text.push_str(&t.guide_line());
-        text.push('\n');
-    }
+    let mut text = String::new();
     if !on_demand.is_empty() {
-        text.push_str("\nSkills you can load with use_skill:\n");
+        text.push_str("Skills (extra instructions for some kinds of requests):\n");
         for s in on_demand {
             text.push_str(&format!("- {}: {}\n", s.name, schema::clean_description_len(&s.description, 160)));
         }
+        text.push_str(SKILL_POLICY);
+        text.push_str("\n\n");
+    }
+    text.push_str("You can use these tools:\n");
+    for t in tools {
+        text.push_str(&t.guide_line());
+        text.push('\n');
     }
     text.push('\n');
     text.push_str(TOOL_POLICY);
     text.push(' ');
     text.push_str(TOOL_PROTOCOL);
     text
+}
+
+// ---------- on-demand skill matching ----------
+
+/// Words that say nothing about what a skill is for.
+const FILLER: &[&str] = &[
+    "about",
+    "also",
+    "and",
+    "any",
+    "anything",
+    "are",
+    "ask",
+    "asked",
+    "asking",
+    "asks",
+    "can",
+    "could",
+    "does",
+    "for",
+    "from",
+    "get",
+    "give",
+    "has",
+    "have",
+    "help",
+    "helps",
+    "how",
+    "into",
+    "its",
+    "like",
+    "may",
+    "must",
+    "need",
+    "needs",
+    "not",
+    "only",
+    "or",
+    "request",
+    "requests",
+    "said",
+    "say",
+    "says",
+    "should",
+    "skill",
+    "skills",
+    "some",
+    "something",
+    "task",
+    "tasks",
+    "tell",
+    "that",
+    "the",
+    "their",
+    "them",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "use",
+    "used",
+    "user",
+    "users",
+    "uses",
+    "using",
+    "want",
+    "wants",
+    "was",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+    "will",
+    "with",
+    "would",
+    "you",
+    "your",
+];
+
+/// A rough English stem, so "fruits" matches "fruit" and "tomatoes" matches "tomato".
+fn stem(word: &str) -> String {
+    let w = word;
+    let n = w.len();
+    if n > 5 && w.ends_with("ing") {
+        return w[..n - 3].to_string();
+    }
+    if n > 4 && w.ends_with("ies") {
+        return format!("{}y", &w[..n - 3]);
+    }
+    if n > 4 && (w.ends_with("oes") || w.ends_with("xes") || w.ends_with("shes") || w.ends_with("ches")) {
+        return w[..n - 2].to_string();
+    }
+    if n > 3 && w.ends_with('s') && !w.ends_with("ss") {
+        return w[..n - 1].to_string();
+    }
+    if n > 4 && w.ends_with("ed") {
+        return w[..n - 2].to_string();
+    }
+    w.to_string()
+}
+
+/// Topic words of a text: lowercase ASCII words of 3+ letters (or numbers),
+/// without filler words, stemmed.
+fn topic_words(text: &str) -> std::collections::BTreeSet<String> {
+    text.split(|c: char| !c.is_ascii_alphanumeric())
+        .map(|w| w.to_ascii_lowercase())
+        .filter(|w| {
+            (w.len() >= 3 || (!w.is_empty() && w.chars().all(|c| c.is_ascii_digit()))) && !FILLER.contains(&w.as_str())
+        })
+        .map(|w| stem(&w))
+        .collect()
+}
+
+/// Lowercase words joined by single spaces (for phrase matching).
+fn normalize(text: &str) -> String {
+    text.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// Phrases in quotes inside a skill description, like `"explain like I am 10"`.
+fn quoted_phrases(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for (open, close) in [('"', '"'), ('“', '”')] {
+        let mut rest = text;
+        while let Some(start) = rest.find(open) {
+            let after = &rest[start + open.len_utf8()..];
+            let Some(end) = after.find(close) else { break };
+            let phrase = normalize(&after[..end]);
+            if phrase.contains(' ') {
+                out.push(phrase);
+            }
+            rest = &after[end + close.len_utf8()..];
+        }
+    }
+    out
+}
+
+/// How well `text` (the user's message) matches a skill; 0 means no match.
+/// A match needs the skill name or a quoted phrase of its description, or
+/// enough topic words of the description (one when it has at most two,
+/// else two). Precision matters more than recall here: the model can still
+/// load a skill itself when the words differ.
+pub fn skill_match_score(text: &str, skill: &Skill) -> usize {
+    let message = normalize(text);
+    let name = normalize(&skill.name);
+    let padded = format!(" {message} ");
+    if (name.contains(' ') && padded.contains(&format!(" {name} "))) || padded.contains(&format!(" {} ", skill.name)) {
+        return 100;
+    }
+    if quoted_phrases(&skill.description).iter().any(|p| padded.contains(&format!(" {p} "))) {
+        return 50;
+    }
+    let topics = topic_words(&skill.description);
+    if topics.is_empty() {
+        return 0;
+    }
+    let overlap = topic_words(text).intersection(&topics).count();
+    let needed = if topics.len() <= 2 { 1 } else { 2 };
+    if overlap >= needed {
+        overlap
+    } else {
+        0
+    }
+}
+
+/// On-demand skills that clearly match the message, best first.
+pub fn matching_skills<'a>(text: &str, on_demand: &[&'a Skill]) -> Vec<&'a Skill> {
+    let mut scored: Vec<(usize, &Skill)> =
+        on_demand.iter().map(|s| (skill_match_score(text, s), *s)).filter(|(score, _)| *score > 0).collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
+    scored.into_iter().map(|(_, s)| s).collect()
 }
 
 fn join_system(base: &str, extra: &str) -> String {
@@ -301,7 +491,8 @@ fn join_system(base: &str, extra: &str) -> String {
 fn user_value(m: &ChatMessage, with_images: bool) -> Value {
     let images: Vec<&String> = if with_images { m.images.iter().collect() } else { Vec::new() };
     if images.is_empty() {
-        let text = if m.text.trim().is_empty() && !m.images.is_empty() { "(an image)".to_string() } else { m.text.clone() };
+        let text =
+            if m.text.trim().is_empty() && !m.images.is_empty() { "(an image)".to_string() } else { m.text.clone() };
         return json!({"role": "user", "content": text});
     }
     let mut parts = Vec::new();
@@ -450,14 +641,8 @@ pub async fn run_turn(
     let dir = &state.engine.chats_dir;
 
     let mut chat = chats::load(dir, chat_id)?;
-    let user = ChatMessage {
-        id: new_id(),
-        role: "user".into(),
-        text,
-        images,
-        created_at: now_ms(),
-        ..Default::default()
-    };
+    let user =
+        ChatMessage { id: new_id(), role: "user".into(), text, images, created_at: now_ms(), ..Default::default() };
     if chat.title == NEW_CHAT_TITLE && !chat.messages.iter().any(|m| m.role == "user") {
         chat.title = if user.text.is_empty() { "Image".into() } else { chats::title_from(&user.text) };
     }
@@ -476,7 +661,11 @@ pub async fn run_turn(
 
     let usage = turn.usage.clone().unwrap_or_else(|| {
         let completion = estimate_tokens(&turn.text);
-        Usage { prompt_tokens: turn.prompt_estimate, completion_tokens: completion, total_tokens: turn.prompt_estimate + completion }
+        Usage {
+            prompt_tokens: turn.prompt_estimate,
+            completion_tokens: completion,
+            total_tokens: turn.prompt_estimate + completion,
+        }
     });
     let message = ChatMessage {
         id: message_id,
@@ -534,7 +723,13 @@ fn parse_usage(v: &Value) -> Option<Usage> {
     Some(Usage { prompt_tokens: prompt, completion_tokens: completion, total_tokens: total })
 }
 
-async fn stream_reply(state: &AppState, body: &Value, plain: bool, cancel: &CancellationToken, emit: Emit<'_>) -> Result<Reply, StreamFail> {
+async fn stream_reply(
+    state: &AppState,
+    body: &Value,
+    plain: bool,
+    cancel: &CancellationToken,
+    emit: Emit<'_>,
+) -> Result<Reply, StreamFail> {
     let mut stream = tokio::select! {
         r = state.engine.server.post_stream("/v1/chat/completions", body) => {
             r.map_err(|error| StreamFail::Fm { error, emitted: false, partial: String::new() })?
@@ -633,20 +828,49 @@ async fn agent_loop(
     } else {
         Vec::new()
     };
-    let base = base_instructions(&chat.instructions, &always);
-    let router_system = join_system(&base, &tool_guide(&tools, &on_demand));
+    // `use_skill` goes first in the guide and in the schema: the model reads
+    // the first choices most carefully.
+    let mut tools = tools;
+    tools.sort_by_key(|t| !matches!(t.kind, ToolKind::UseSkill { .. }));
     let router = if tools.is_empty() {
         None
     } else {
-        let entries: Vec<(String, Value, String)> =
-            tools.iter().map(|t| (t.info.name.clone(), t.info.input_schema.clone(), t.info.description.clone())).collect();
-        Some(json!({"type": "json_schema", "json_schema": {"name": "Action", "schema": schema::router_schema(&entries)}}))
+        let entries: Vec<(String, Value, String)> = tools
+            .iter()
+            .map(|t| (t.info.name.clone(), t.info.input_schema.clone(), t.info.description.clone()))
+            .collect();
+        Some(
+            json!({"type": "json_schema", "json_schema": {"name": "Action", "schema": schema::router_schema(&entries)}}),
+        )
+    };
+
+    // On-demand skills that clearly match the message are loaded right away
+    // (shown as a normal use_skill step); the model can load others itself.
+    // Loaded skills become part of the system instructions.
+    let mut loaded: Vec<&Skill> = Vec::new();
+    let user_text = chat.messages.last().map(|m| m.text.as_str()).unwrap_or("");
+    if let Some(use_skill) = tools.iter().find(|t| matches!(t.kind, ToolKind::UseSkill { .. })) {
+        for skill in matching_skills(user_text, &on_demand).into_iter().take(MAX_AUTO_SKILLS) {
+            let args = json!({"name": skill.name});
+            let content = run_step(state, app, cfg, use_skill, args, turn, cancel, emit, DEFAULT_RESULT_CHARS).await?;
+            if !content.starts_with("Error:") {
+                loaded.push(skill);
+            }
+        }
+    }
+    let instructions = |loaded: &[&Skill]| {
+        let in_system: Vec<&Skill> = always.iter().chain(loaded.iter()).copied().collect();
+        let pending: Vec<&Skill> =
+            on_demand.iter().filter(|s| !loaded.iter().any(|l| l.name == s.name)).copied().collect();
+        let base = base_instructions(&chat.instructions, &in_system);
+        let router_system = join_system(&base, &tool_guide(&tools, &pending));
+        (base, router_system)
     };
 
     // History, trimmed to the budget.
     let budget = prompt_budget(cfg.context_size);
     let (mut history, current) = build_history(&chat.messages);
-    let fixed = estimate_tokens(&router_system) + MESSAGE_TOKENS + message_tokens(&current);
+    let fixed = estimate_tokens(&instructions(&loaded).1) + MESSAGE_TOKENS + message_tokens(&current);
     trim_history(&mut history, budget.saturating_sub(fixed));
 
     let max_steps = cfg.chat_defaults.max_tool_steps;
@@ -659,8 +883,9 @@ async fn agent_loop(
 
     loop {
         let use_router = !force_plain;
+        let (base, router_system) = instructions(&loaded);
         let system = if use_router {
-            router_system.clone()
+            router_system
         } else if steps_done > 0 {
             join_system(&base, "Answer the user now in Markdown. Use the tool results above.")
         } else {
@@ -694,9 +919,11 @@ async fn agent_loop(
             emit(AgentEvent::Status { text: "Writing the answer…".into() });
         }
 
-        // Debug aid for developers: write the last request body to a file.
-        if let Ok(path) = std::env::var("FMGUI_DUMP_REQUEST") {
-            let _ = std::fs::write(path, serde_json::to_vec_pretty(&body).unwrap_or_default());
+        // Debug builds only: write the last request body to a file.
+        if cfg!(debug_assertions) {
+            if let Ok(path) = std::env::var("FMGUI_DUMP_REQUEST") {
+                let _ = std::fs::write(path, serde_json::to_vec_pretty(&body).unwrap_or_default());
+            }
         }
         let reply = match stream_reply(state, &body, !use_router, cancel, emit).await {
             Ok(reply) => reply,
@@ -782,7 +1009,16 @@ async fn agent_loop(
         let used = messages_tokens(&body["messages"].as_array().cloned().unwrap_or_default());
         let room = budget.saturating_sub(used) as usize;
         let max_chars = (room * 4 / 2).clamp(400, DEFAULT_RESULT_CHARS);
-        let content = run_step(state, app, cfg, tool, args.clone(), turn, cancel, emit, max_chars).await?;
+        let mut content = run_step(state, app, cfg, tool, args.clone(), turn, cancel, emit, max_chars).await?;
+        if matches!(tool.kind, ToolKind::UseSkill { .. }) && !content.starts_with("Error:") {
+            let wanted = args.get("name").and_then(Value::as_str).unwrap_or("").trim();
+            if let Some(skill) = on_demand.iter().find(|s| s.name == wanted) {
+                if !loaded.iter().any(|l| l.name == skill.name) {
+                    loaded.push(skill);
+                }
+                content = format!("Skill \"{}\" {SKILL_LOADED}", skill.name);
+            }
+        }
 
         steps_done += 1;
         let call_id = format!("call_{steps_done}");
@@ -1004,7 +1240,10 @@ mod tests {
     fn parses_actions() {
         assert_eq!(parse_action("{\"answer\": \"x\"}"), Action::Answer("x".into()));
         assert_eq!(parse_action("{\"answer\": {}}"), Action::Answer(String::new()));
-        assert_eq!(parse_action("{\"get_current_datetime\": {}}"), Action::Tool("get_current_datetime".into(), json!({})));
+        assert_eq!(
+            parse_action("{\"get_current_datetime\": {}}"),
+            Action::Tool("get_current_datetime".into(), json!({}))
+        );
         assert_eq!(parse_action("{\"t\": \"oops\"} trailing"), Action::Tool("t".into(), json!({})));
         assert_eq!(parse_action("not json"), Action::Invalid);
         assert_eq!(parse_action("{\"a\": {}, \"b\": {}}"), Action::Invalid);
@@ -1075,10 +1314,12 @@ mod tests {
     fn always_approval_is_saved() {
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new(crate::state::Paths::new(dir.path().to_path_buf()));
-        state.config.write().unwrap().builtin_tools.insert(
-            "fetch_url".into(),
-            crate::config::ToolPrefs { enabled: true, approval: Approval::Ask },
-        );
+        state
+            .config
+            .write()
+            .unwrap()
+            .builtin_tools
+            .insert("fetch_url".into(), crate::config::ToolPrefs { enabled: true, approval: Approval::Ask });
         let cfg = state.config();
         let cat = tools::build_catalog(&cfg, &[], &[]);
         let fetch = cat.iter().find(|t| t.info.id == "builtin:fetch_url").unwrap();
@@ -1096,10 +1337,50 @@ mod tests {
     }
 
     #[test]
+    fn skills_match_by_name_phrase_or_topic_words() {
+        let skill = |name: &str, description: &str| Skill {
+            name: name.into(),
+            description: description.into(),
+            ..Default::default()
+        };
+        let fruit = skill("fruit-facts", "Use when the user asks about fruit.");
+        for q in ["Which fruit has the most vitamin C?", "Is a tomato a fruit?", "Name three tropical fruits."] {
+            assert!(skill_match_score(q, &fruit) > 0, "{q}");
+        }
+        for q in ["What is the capital of France?", "Write a haiku about the sea.", "Tell me facts about Rome", ""] {
+            assert_eq!(skill_match_score(q, &fruit), 0, "{q}");
+        }
+        assert!(skill_match_score("Use fruit-facts for this", &fruit) >= 100);
+
+        let eli10 = skill(
+            "explain-like-10",
+            "Use when the user asks for a simple explanation, or says \"explain like I am 10\".",
+        );
+        assert!(skill_match_score("Explain like I am 10: what is a black hole?", &eli10) > 0);
+        assert!(skill_match_score("explain   like i am 10, please", &eli10) > 0);
+        assert_eq!(skill_match_score("Explain how a car engine works.", &eli10), 0);
+
+        let pdf = skill("pdf", "Fill and read PDF forms.");
+        let code = skill("code-review", "Use when reviewing source code changes for bugs and style problems.");
+        let all = [&pdf, &code, &fruit];
+        assert_eq!(
+            matching_skills("Please fill this PDF form", &all).iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["pdf"]
+        );
+        assert!(matching_skills("Write a haiku", &all).is_empty());
+        assert_eq!(stem("tomatoes"), "tomato");
+        assert_eq!(stem("berries"), "berry");
+        assert_eq!(stem("notes"), "note");
+        assert_eq!(stem("glass"), "glass");
+    }
+
+    #[test]
     fn guide_lists_tools_and_skills() {
         let cfg = AppConfig::default();
-        let skills = vec![Skill { name: "pdf-tips".into(), description: "Work with PDFs".into(), ..Default::default() }];
-        let tools: Vec<CatalogTool> = tools::build_catalog(&cfg, &[], &skills).into_iter().filter(|t| t.info.enabled).collect();
+        let skills =
+            vec![Skill { name: "pdf-tips".into(), description: "Work with PDFs".into(), ..Default::default() }];
+        let tools: Vec<CatalogTool> =
+            tools::build_catalog(&cfg, &[], &skills).into_iter().filter(|t| t.info.enabled).collect();
         let refs: Vec<&Skill> = skills.iter().collect();
         let guide = tool_guide(&tools, &refs);
         assert!(guide.contains("- calculator(expression: string): "), "{guide}");

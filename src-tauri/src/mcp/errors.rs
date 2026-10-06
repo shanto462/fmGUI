@@ -1,5 +1,4 @@
 //! Friendly error texts (simple English) and command lookup for MCP servers.
-//! OWNER: agent "mcp".
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -67,7 +66,9 @@ pub fn resolve_program(command: &str, env: &HashMap<String, String>, cwd: Option
             return Err(command_not_found(command));
         }
         if !is_executable(&path) {
-            return Err(format!("{command} is not a program fmGUI can run. Check that the file is executable (chmod +x)."));
+            return Err(format!(
+                "{command} is not a program fmGUI can run. Check that the file is executable (chmod +x)."
+            ));
         }
         return Ok(path);
     }
@@ -202,7 +203,9 @@ mod tests {
         let mut env = HashMap::new();
         env.insert("PATH".to_string(), "/nonexistent:/bin:/usr/bin".to_string());
         assert_eq!(resolve_program("sh", &env, None).unwrap(), PathBuf::from("/bin/sh"));
-        assert!(resolve_program("definitely-not-a-real-program-xyz", &env, None).unwrap_err().starts_with("Command not found"));
+        assert!(resolve_program("definitely-not-a-real-program-xyz", &env, None)
+            .unwrap_err()
+            .starts_with("Command not found"));
         assert!(resolve_program("  ", &env, None).is_err());
         assert_eq!(resolve_program("/bin/sh", &env, None).unwrap(), PathBuf::from("/bin/sh"));
         assert!(resolve_program("/etc/hosts", &env, None).unwrap_err().contains("executable"));
@@ -222,7 +225,10 @@ mod tests {
 
     #[test]
     fn exit_messages_with_hints() {
-        let tail = vec!["npm error code E404".to_string(), "npm error 404 Not Found - GET https://registry.npmjs.org/@x%2fy".to_string()];
+        let tail = vec![
+            "npm error code E404".to_string(),
+            "npm error 404 Not Found - GET https://registry.npmjs.org/@x%2fy".to_string(),
+        ];
         let msg = exit_message(Some(1), &tail);
         assert!(msg.starts_with("The server stopped (exit code 1)."));
         assert!(msg.contains("could not find this package"));

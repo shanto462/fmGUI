@@ -69,8 +69,13 @@ async fn stdio_client_round_trip() {
     let Some(cfg) = stdio_config("client") else { return };
     let tail = LogTail::default();
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let client = McpClient::start(&cfg, tail.clone(), tx).await.unwrap();
+    let pid_dir = tempfile::tempdir().unwrap();
+    let pid_file = pid_dir.path().join("client.pid");
+    let client = McpClient::start(&cfg, tail.clone(), tx, Some(pid_file.clone())).await.unwrap();
     client.initialize().await.unwrap();
+    // The process group is recorded while the server runs.
+    let record: crate::procs::PidRecord = serde_json::from_slice(&std::fs::read(&pid_file).unwrap()).unwrap();
+    assert!(record.group && record.pid > 1 && crate::procs::record_is_live(&record), "{record:?}");
 
     let info = client.info();
     assert_eq!(info.name.as_deref(), Some("fixture"));
@@ -98,6 +103,7 @@ async fn stdio_client_round_trip() {
     assert!(lines.contains(&"[info] fixture: rich called".to_string()), "{lines:?}");
 
     client.close().await;
+    assert!(!pid_file.exists(), "the pid file is removed when the server stops");
     // Closing on purpose is not an error.
     tokio::time::sleep(Duration::from_millis(100)).await;
     while let Ok(event) = rx.try_recv() {
@@ -245,7 +251,7 @@ async fn http_client_round_trip_with_sse_and_session_expiry() {
     let cfg = http_config("http", format!("http://127.0.0.1:{port}/mcp"), Some("test-token-123"));
     let tail = LogTail::default();
     let (tx, _rx) = mpsc::unbounded_channel();
-    let client = McpClient::start(&cfg, tail.clone(), tx).await.unwrap();
+    let client = McpClient::start(&cfg, tail.clone(), tx, None).await.unwrap();
     client.initialize().await.unwrap();
     assert_eq!(client.info().name.as_deref(), Some("http-fixture"));
     assert_eq!(client.list_tools().await.unwrap().len(), 2);
@@ -358,6 +364,7 @@ async fn close_stops_a_stubborn_server_and_its_children() {
         args: vec!["-c".into(), "sleep 300 & echo child=$! >&2; wait".into()],
         env: vec![],
         cwd: None,
+        pid_file: None,
     };
     let transport = super::stdio::StdioTransport::spawn(spec, tail.clone(), tx).await.unwrap();
     let mut child_pid = None;
@@ -369,7 +376,8 @@ async fn close_stops_a_stubborn_server_and_its_children() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let child_pid = child_pid.expect("the shell printed its child pid");
-    let alive = |pid: &str| std::process::Command::new("/bin/kill").args(["-0", pid]).output().unwrap().status.success();
+    let alive =
+        |pid: &str| std::process::Command::new("/bin/kill").args(["-0", pid]).output().unwrap().status.success();
     assert!(alive(&child_pid));
     transport.close().await;
     let mut gone = false;

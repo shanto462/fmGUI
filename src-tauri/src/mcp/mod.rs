@@ -1,6 +1,5 @@
 //! Minimal MCP client (JSON-RPC 2.0): stdio and Streamable HTTP transports,
 //! tools only (initialize → notifications/initialized → tools/list → tools/call).
-//! OWNER: agent "mcp". Items marked CONTRACT keep their signatures.
 //! Event: "mcp-status" with Vec<McpServerStatus> whenever a server changes state.
 
 pub mod client;
@@ -20,13 +19,14 @@ use client::{ClientEvent, McpClient, ToolDef};
 use rpc::LogTail;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex};
 
-/// CONTRACT: a tool offered by a connected server (unfiltered).
+/// A tool offered by a connected server (unfiltered).
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct McpToolDescriptor {
@@ -37,7 +37,7 @@ pub struct McpToolDescriptor {
     pub input_schema: serde_json::Value,
 }
 
-/// CONTRACT
+/// A tool as shown on the MCP page.
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct McpToolSummary {
@@ -48,7 +48,7 @@ pub struct McpToolSummary {
     pub enabled: bool,
 }
 
-/// CONTRACT
+/// State of one configured server, for the MCP page.
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerStatus {
@@ -64,7 +64,7 @@ pub struct McpServerStatus {
     pub stderr_tail: Vec<String>,
 }
 
-/// CONTRACT
+/// Result of a test connection (setup wizard).
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct McpTestResult {
@@ -99,11 +99,13 @@ struct Connection {
 
 type ConnMap = Arc<Mutex<HashMap<String, Connection>>>;
 
-/// CONTRACT: lives in AppState.
+/// All MCP connections. Lives in AppState.
 #[derive(Default)]
 pub struct McpManager {
     conns: ConnMap,
     generation: AtomicU64,
+    /// Where stdio servers write their pid files (none in tests).
+    pid_dir: Option<PathBuf>,
 }
 
 fn summaries(tools: &[ToolDef], disabled: &[String]) -> Vec<McpToolSummary> {
@@ -141,7 +143,11 @@ fn build_statuses(map: &HashMap<String, Connection>, configs: &[McpServerConfig]
                     error,
                     server_name: c.server_name.clone(),
                     server_version: c.server_version.clone(),
-                    tools: if c.phase == Phase::Connected { summaries(&c.tools, &cfg.disabled_tools) } else { Vec::new() },
+                    tools: if c.phase == Phase::Connected {
+                        summaries(&c.tools, &cfg.disabled_tools)
+                    } else {
+                        Vec::new()
+                    },
                     stderr_tail: c.tail.snapshot(),
                 }
             }
@@ -163,8 +169,9 @@ async fn open(
     config: &McpServerConfig,
     tail: LogTail,
     events: mpsc::UnboundedSender<ClientEvent>,
+    pid_file: Option<PathBuf>,
 ) -> Result<(McpClient, Vec<ToolDef>), String> {
-    let client = McpClient::start(config, tail, events).await?;
+    let client = McpClient::start(config, tail, events, pid_file).await?;
     if let Err(err) = client.initialize().await {
         client.close().await;
         return Err(err);
@@ -226,7 +233,17 @@ async fn watch_connection(
 }
 
 impl McpManager {
-    /// CONTRACT: connect (or reconnect) one server and list its tools.
+    /// A manager whose stdio servers write `<pid_dir>/<server id>.pid`, so a
+    /// later start of the app can stop servers left by a crash.
+    pub fn with_pid_dir(pid_dir: PathBuf) -> Self {
+        Self { pid_dir: Some(pid_dir), ..Default::default() }
+    }
+
+    fn pid_file(&self, name: &str) -> Option<PathBuf> {
+        self.pid_dir.as_ref().map(|dir| dir.join(crate::procs::pid_file_name(name)))
+    }
+
+    /// Connects (or reconnects) one server and lists its tools.
     pub async fn connect(&self, app: &AppHandle, config: &McpServerConfig) -> Result<(), String> {
         self.connect_with(Some(app), config).await
     }
@@ -255,7 +272,7 @@ impl McpManager {
         emit(&self.conns, app).await;
 
         let (tx, rx) = mpsc::unbounded_channel();
-        match open(config, tail, tx).await {
+        match open(config, tail, tx, self.pid_file(&config.id)).await {
             Ok((client, tools)) => {
                 let client = Arc::new(client);
                 let info = client.info();
@@ -302,7 +319,7 @@ impl McpManager {
         }
     }
 
-    /// CONTRACT
+    /// Stops one server.
     pub async fn disconnect(&self, app: &AppHandle, server_id: &str) {
         self.disconnect_with(Some(app), server_id).await
     }
@@ -325,12 +342,12 @@ impl McpManager {
         futures_util::future::join_all(stale.iter().map(|c| c.close())).await;
     }
 
-    /// CONTRACT: one status per configured server (disconnected when not running).
+    /// One status per configured server (disconnected when not running).
     pub async fn statuses(&self, configs: &[McpServerConfig]) -> Vec<McpServerStatus> {
         build_statuses(&*self.conns.lock().await, configs)
     }
 
-    /// CONTRACT: all tools of all connected servers (the engine filters by config).
+    /// All tools of all connected servers (the engine filters by config).
     pub async fn tools(&self) -> Vec<McpToolDescriptor> {
         let map = self.conns.lock().await;
         let mut connected: Vec<(&String, &Connection)> =
@@ -350,30 +367,33 @@ impl McpManager {
             .collect()
     }
 
-    /// CONTRACT: call a tool; returns the text content joined (images/resources described in text).
+    /// Calls a tool; returns the text content joined (images/resources described in text).
     /// An MCP tool result with `isError: true` → Err(text).
     pub async fn call_tool(&self, server_id: &str, tool: &str, arguments: serde_json::Value) -> Result<String, String> {
         let client = {
             let map = self.conns.lock().await;
-            let conn = map.get(server_id).ok_or("This MCP server is not connected. Connect it on the MCP page first.")?;
+            let conn =
+                map.get(server_id).ok_or("This MCP server is not connected. Connect it on the MCP page first.")?;
             match (&conn.phase, &conn.client) {
                 (Phase::Connected, Some(client)) => client.clone(),
                 (Phase::Connecting, _) => {
                     return Err(format!("The MCP server \"{}\" is still starting. Try again in a moment.", conn.name))
                 }
-                (Phase::Error(err), _) => return Err(format!("The MCP server \"{}\" is not working: {err}", conn.name)),
+                (Phase::Error(err), _) => {
+                    return Err(format!("The MCP server \"{}\" is not working: {err}", conn.name))
+                }
                 _ => return Err(format!("The MCP server \"{}\" is not connected.", conn.name)),
             }
         };
         client.call_tool(tool, arguments).await
     }
 
-    /// CONTRACT: connect, list tools, disconnect. For the setup wizard.
+    /// Connects, lists tools, disconnects. For the setup wizard.
     pub async fn test(&self, config: &McpServerConfig) -> McpTestResult {
         let started = Instant::now();
         let tail = LogTail::default();
         let (tx, _rx) = mpsc::unbounded_channel();
-        let result = open(config, tail.clone(), tx).await;
+        let result = open(config, tail.clone(), tx, self.pid_file(&format!("test-{}", crate::util::new_id()))).await;
         let mut out = match result {
             Ok((client, tools)) => {
                 let info = client.info();
@@ -394,10 +414,9 @@ impl McpManager {
         out
     }
 
-    /// CONTRACT: stop every server. Called on app exit.
+    /// Stops every server. Called on app exit.
     pub async fn shutdown(&self) {
-        let clients: Vec<Arc<McpClient>> =
-            self.conns.lock().await.drain().filter_map(|(_, c)| c.client).collect();
+        let clients: Vec<Arc<McpClient>> = self.conns.lock().await.drain().filter_map(|(_, c)| c.client).collect();
         futures_util::future::join_all(clients.iter().map(|c| c.close())).await;
     }
 }

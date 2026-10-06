@@ -1,5 +1,5 @@
 //! Built-in tools: date/time, calculator, fetch_url, Spotlight, file tools,
-//! shell, clipboard, open_url, Shortcuts. OWNER: agent "engine".
+//! shell, clipboard, open_url, Shortcuts.
 
 use super::process::{run_process, ProcOutput};
 use crate::config::{Approval, ParamType};
@@ -172,6 +172,7 @@ pub const BUILTINS: &[BuiltinSpec] = &[
 ];
 
 pub fn spec(kind: Builtin) -> &'static BuiltinSpec {
+    // Not input-dependent: the `every_builtin_has_one_spec` test checks it.
     BUILTINS.iter().find(|s| s.kind == kind).expect("every builtin has a spec")
 }
 
@@ -189,7 +190,9 @@ pub async fn run(kind: Builtin, args: &Value, env: &BuiltinEnv<'_>) -> Result<St
         Builtin::SpotlightSearch => spotlight(arg_str(args, "query")?).await,
         Builtin::ReadFile => read_file(arg_str(args, "path")?, env.allowed_folders),
         Builtin::ListDirectory => list_directory(arg_str(args, "path")?, env.allowed_folders),
-        Builtin::WriteFile => write_file(arg_str(args, "path")?, arg_str(args, "content").unwrap_or(""), env.allowed_folders),
+        Builtin::WriteFile => {
+            write_file(arg_str(args, "path")?, arg_str(args, "content").unwrap_or(""), env.allowed_folders)
+        }
         Builtin::RunShellCommand => run_shell(arg_str(args, "command")?).await,
         Builtin::ReadClipboard => read_clipboard().await,
         Builtin::OpenUrl => open_url(arg_str(args, "url")?).await,
@@ -451,7 +454,8 @@ pub fn html_to_text(html: &str) -> String {
         .map(|c| decode_entities(c[1].trim()))
         .filter(|t| !t.is_empty());
 
-    let mut s = COMMENT.get_or_init(|| regex::Regex::new(r"(?s)<!--.*?-->").unwrap()).replace_all(html, " ").into_owned();
+    let mut s =
+        COMMENT.get_or_init(|| regex::Regex::new(r"(?s)<!--.*?-->").unwrap()).replace_all(html, " ").into_owned();
     let drops = DROP.get_or_init(|| {
         ["script", "style", "nav", "noscript", "svg", "template", "iframe", "head"]
             .iter()
@@ -574,6 +578,12 @@ fn named_entity(name: &str) -> Option<&'static str> {
 // ---------- Spotlight ----------
 
 async fn spotlight(query: &str) -> Result<String, String> {
+    // mdfind has no `--`: a query that starts with "-" would be read as an
+    // option (for example -live, which never ends).
+    let query = query.trim_start_matches(['-', ' ']).trim();
+    if query.is_empty() {
+        return Err("The search words are empty.".into());
+    }
     let mut cmd = tokio::process::Command::new("/usr/bin/mdfind");
     cmd.arg(query);
     let out = run_process(cmd, None, Duration::from_secs(15)).await?;
@@ -618,24 +628,33 @@ fn outside_error(allowed: &[String]) -> String {
 }
 
 /// Resolves `path` (with `~`, relative to the first allowed folder) and makes
-/// sure it is inside an allowed folder after following symlinks. With
-/// `must_exist = false` only the parent folder must exist (for writing).
+/// sure it is inside an allowed folder. Symlinks and `..` are resolved first,
+/// so a link inside an allowed folder that points outside is refused. With
+/// `must_exist = false` (writing) only the parent folder must exist; the new
+/// name may not be `..` or a symlink (a dangling link could point anywhere).
 pub fn resolve_allowed(path: &str, allowed: &[String], must_exist: bool) -> Result<PathBuf, String> {
     let roots = allowed_roots(allowed);
     if roots.is_empty() {
         return Err("No folders are allowed for file tools yet. The user can add one in Settings.".into());
     }
+    if path.contains('\0') {
+        return Err("The path is not valid.".into());
+    }
     let mut p = expand_tilde(path);
     if p.is_relative() {
         p = roots[0].join(p);
     }
-    let resolved = if must_exist || p.exists() {
-        p.canonicalize().map_err(|_| format!("{} does not exist.", p.display()))?
-    } else {
-        let parent = p.parent().ok_or_else(|| "This path has no folder.".to_string())?;
-        let name = p.file_name().ok_or_else(|| "This path has no file name.".to_string())?;
-        let parent = parent.canonicalize().map_err(|_| format!("The folder {} does not exist.", parent.display()))?;
-        parent.join(name)
+    let resolved = match std::fs::symlink_metadata(&p) {
+        // Exists (maybe as a symlink): follow every link. A dangling link fails here.
+        Ok(_) => p.canonicalize().map_err(|_| format!("{} does not exist.", p.display()))?,
+        Err(_) if must_exist => return Err(format!("{} does not exist.", p.display())),
+        Err(_) => {
+            let name = p.file_name().ok_or_else(|| "This path has no file name.".to_string())?;
+            let parent = p.parent().ok_or_else(|| "This path has no folder.".to_string())?;
+            let parent =
+                parent.canonicalize().map_err(|_| format!("The folder {} does not exist.", parent.display()))?;
+            parent.join(name)
+        }
     };
     if roots.iter().any(|root| resolved.starts_with(root)) {
         Ok(resolved)
@@ -644,16 +663,33 @@ pub fn resolve_allowed(path: &str, allowed: &[String], must_exist: bool) -> Resu
     }
 }
 
+/// Opens with O_NOFOLLOW: if the last part of the path became a symlink after
+/// the check (a race), the open fails instead of following it. O_NONBLOCK
+/// keeps a pipe swapped in at that moment from blocking the open.
+fn open_no_follow(path: &Path, write: bool) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut options = std::fs::OpenOptions::new();
+    if write {
+        options.write(true).create(true).truncate(true).mode(0o644);
+    } else {
+        options.read(true);
+    }
+    options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)
+}
+
 pub fn read_file(path: &str, allowed: &[String]) -> Result<String, String> {
     let p = resolve_allowed(path, allowed, true)?;
     let meta = std::fs::metadata(&p).map_err(|e| format!("{}: {e}", p.display()))?;
     if meta.is_dir() {
         return Err(format!("{} is a folder. Use list_directory.", p.display()));
     }
+    if !meta.is_file() {
+        return Err(format!("{} is not a regular file.", p.display()));
+    }
     use std::io::Read;
-    let mut file = std::fs::File::open(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+    let file = open_no_follow(&p, false).map_err(|e| format!("{}: {e}", p.display()))?;
     let mut buf = Vec::new();
-    file.by_ref().take(MAX_READ as u64).read_to_end(&mut buf).map_err(|e| e.to_string())?;
+    file.take(MAX_READ as u64).read_to_end(&mut buf).map_err(|e| e.to_string())?;
     if buf.iter().take(8192).any(|b| *b == 0) {
         return Err(format!("{} is not a text file.", p.display()));
     }
@@ -696,10 +732,14 @@ pub fn list_directory(path: &str, allowed: &[String]) -> Result<String, String> 
 
 pub fn write_file(path: &str, content: &str, allowed: &[String]) -> Result<String, String> {
     let p = resolve_allowed(path, allowed, false)?;
-    if p.is_dir() {
-        return Err(format!("{} is a folder.", p.display()));
+    match std::fs::symlink_metadata(&p) {
+        Ok(meta) if meta.is_dir() => return Err(format!("{} is a folder.", p.display())),
+        Ok(meta) if !meta.is_file() => return Err(format!("{} is not a regular file.", p.display())),
+        _ => {}
     }
-    std::fs::write(&p, content).map_err(|e| format!("Could not write {}: {e}", p.display()))?;
+    use std::io::Write;
+    let mut file = open_no_follow(&p, true).map_err(|e| format!("Could not write {}: {e}", p.display()))?;
+    file.write_all(content.as_bytes()).map_err(|e| format!("Could not write {}: {e}", p.display()))?;
     Ok(format!("Wrote {} characters to {}.", content.chars().count(), p.display()))
 }
 
@@ -787,18 +827,24 @@ async fn open_url(url: &str) -> Result<String, String> {
 }
 
 /// `shortcuts run <name> [--input-path <file>] --output-path <file>`.
-pub async fn run_shortcut(name: &str, input: Option<&[u8]>, tmp_dir: &Path, timeout: Duration) -> Result<String, String> {
+pub async fn run_shortcut(
+    name: &str,
+    input: Option<&[u8]>,
+    tmp_dir: &Path,
+    timeout: Duration,
+) -> Result<String, String> {
     let _ = std::fs::create_dir_all(tmp_dir);
     let id = crate::util::new_id();
     let in_path = tmp_dir.join(format!("shortcut-{id}-in.txt"));
     let out_path = tmp_dir.join(format!("shortcut-{id}-out"));
     let mut cmd = tokio::process::Command::new("/usr/bin/shortcuts");
-    cmd.arg("run").arg(name);
+    cmd.arg("run");
     if let Some(data) = input {
         std::fs::write(&in_path, data).map_err(|e| format!("Could not write the shortcut input: {e}"))?;
         cmd.arg("--input-path").arg(&in_path);
     }
-    cmd.arg("--output-path").arg(&out_path);
+    // `--` so a name that starts with "-" is never read as an option.
+    cmd.arg("--output-path").arg(&out_path).arg("--").arg(name);
     let result = run_process(cmd, None, timeout).await;
     let output = std::fs::read(&out_path).ok();
     let _ = std::fs::remove_file(&in_path);
@@ -829,7 +875,8 @@ pub async fn shortcuts_list() -> Result<Vec<String>, String> {
     if out.status != Some(0) {
         return Err(format!("Could not list shortcuts. {}", out.stderr.trim()));
     }
-    let mut names: Vec<String> = out.stdout.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect();
+    let mut names: Vec<String> =
+        out.stdout.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect();
     names.sort_by_key(|n| n.to_lowercase());
     names.dedup();
     Ok(names)
@@ -916,7 +963,9 @@ mod tests {
         assert_eq!(read_file("sub/note.txt", &allowed).unwrap(), "hello");
         assert!(read_file(&other.join("secret.txt").display().to_string(), &allowed).is_err());
         assert!(read_file(&allowed_dir.join("../other/secret.txt").display().to_string(), &allowed).is_err());
-        assert!(read_file(&allowed_dir.join("link.txt").display().to_string(), &allowed).unwrap_err().contains("outside"));
+        assert!(read_file(&allowed_dir.join("link.txt").display().to_string(), &allowed)
+            .unwrap_err()
+            .contains("outside"));
         assert!(read_file(&root.path().join("allowed2/x.txt").display().to_string(), &allowed).is_err());
         assert!(read_file("/etc/hosts", &[]).unwrap_err().contains("No folders"));
 
@@ -930,6 +979,78 @@ mod tests {
         // Writing through a symlink that points outside is refused.
         assert!(write_file(&allowed_dir.join("link.txt").display().to_string(), "no", &allowed).is_err());
         assert_eq!(std::fs::read_to_string(other.join("secret.txt")).unwrap(), "secret");
+    }
+
+    #[test]
+    fn every_builtin_has_one_spec() {
+        use Builtin::*;
+        let all = [
+            CurrentDatetime,
+            Calculator,
+            FetchUrl,
+            SpotlightSearch,
+            ReadFile,
+            ListDirectory,
+            WriteFile,
+            RunShellCommand,
+            ReadClipboard,
+            OpenUrl,
+            RunShortcut,
+        ];
+        assert_eq!(all.len(), BUILTINS.len());
+        for kind in all {
+            assert_eq!(BUILTINS.iter().filter(|s| s.kind == kind).count(), 1, "{kind:?}");
+            assert_eq!(spec(kind).kind, kind);
+        }
+    }
+
+    #[test]
+    fn symlink_and_special_file_escapes_are_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let allowed_dir = root.path().join("allowed");
+        let outside = root.path().join("outside");
+        std::fs::create_dir_all(&allowed_dir).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), "secret").unwrap();
+        let allowed = vec![allowed_dir.display().to_string()];
+        let inside = |name: &str| allowed_dir.join(name).display().to_string();
+
+        // A dangling symlink inside the allowed folder that points outside:
+        // writing through it would create a file outside.
+        std::os::unix::fs::symlink(outside.join("new.txt"), allowed_dir.join("dangling")).unwrap();
+        assert!(write_file(&inside("dangling"), "x", &allowed).is_err());
+        assert!(!outside.join("new.txt").exists(), "nothing may be written outside");
+
+        // A symlinked folder that points outside.
+        std::os::unix::fs::symlink(&outside, allowed_dir.join("door")).unwrap();
+        assert!(list_directory(&inside("door"), &allowed).unwrap_err().contains("outside"));
+        assert!(read_file(&inside("door/secret.txt"), &allowed).unwrap_err().contains("outside"));
+        assert!(write_file(&inside("door/x.txt"), "x", &allowed).unwrap_err().contains("outside"));
+        assert!(!outside.join("x.txt").exists());
+
+        // `..` in every form.
+        assert!(write_file(&inside("../outside/y.txt"), "x", &allowed).unwrap_err().contains("outside"));
+        assert!(write_file(&inside(".."), "x", &allowed).is_err());
+        assert!(write_file("../outside/z.txt", "x", &allowed).unwrap_err().contains("outside"));
+        assert!(read_file("sub/../../outside/secret.txt", &allowed).is_err());
+        assert!(read_file("a\0b", &allowed).is_err());
+
+        // A named pipe would block a read forever; a folder is not a file.
+        let fifo = allowed_dir.join("pipe");
+        let c_path = std::ffi::CString::new(fifo.display().to_string()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+        assert!(read_file(&inside("pipe"), &allowed).unwrap_err().contains("not a regular file"));
+        assert!(write_file(&inside("pipe"), "x", &allowed).unwrap_err().contains("not a regular file"));
+        std::fs::create_dir_all(allowed_dir.join("dir")).unwrap();
+        assert!(write_file(&inside("dir"), "x", &allowed).unwrap_err().contains("is a folder"));
+
+        // A symlink to a file inside the allowed folder is fine.
+        std::fs::write(allowed_dir.join("real.txt"), "real").unwrap();
+        std::os::unix::fs::symlink(allowed_dir.join("real.txt"), allowed_dir.join("alias.txt")).unwrap();
+        assert_eq!(read_file(&inside("alias.txt"), &allowed).unwrap(), "real");
+        write_file(&inside("alias.txt"), "changed", &allowed).unwrap();
+        assert_eq!(std::fs::read_to_string(allowed_dir.join("real.txt")).unwrap(), "changed");
+        assert_eq!(std::fs::read_to_string(outside.join("secret.txt")).unwrap(), "secret");
     }
 
     #[test]

@@ -23,20 +23,39 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "transparent": true,
-        "trafficLightPosition": { "x": 20, "y": 24 },
+        "trafficLightPosition": {
+          "x": 20,
+          "y": 24
+        },
         "windowEffects": {
-          "effects": ["sidebar"],
+          "effects": [
+            "sidebar"
+          ],
           "state": "followsWindowActiveState"
         }
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob:",
+        "font-src": "'self' data:",
+        "connect-src": "ipc: http://ipc.localhost",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "form-action": "'none'",
+        "frame-src": "'none'"
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "category": "DeveloperTool",
     "shortDescription": "A desktop app for Apple's fm CLI",
     "macOS": {

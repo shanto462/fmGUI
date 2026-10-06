@@ -1,14 +1,15 @@
-//! Tauri commands for skills. OWNER: agent "mcp". CONTRACT: mirrored in `src/lib/api.ts`.
+//! Tauri commands for skills, mirrored in `src/lib/api.ts`.
 //! Skill modes (off / onDemand / always) live in config.skills and are saved with `save_config`.
 
 use super::{Skill, SkillCandidate, SkillInput, SkillStore};
 use crate::config::AppConfig;
 use crate::state::AppState;
+use crate::util::RwLockExt;
 use tauri::State;
 
 /// Changes the config and saves it. `change` returns false when nothing changed.
 fn update_config(state: &AppState, change: impl FnOnce(&mut AppConfig) -> bool) -> Result<(), String> {
-    let mut guard = state.config.write().unwrap();
+    let mut guard = state.config.write_safe();
     let mut next = guard.clone();
     if !change(&mut next) {
         return Ok(());
@@ -75,8 +76,9 @@ pub async fn skill_import(state: State<'_, AppState>, path: String) -> Result<Sk
 pub async fn skill_token_count(state: State<'_, AppState>, name: String) -> Result<u32, String> {
     let dir = state.skills.dir.clone();
     let lookup = name.clone();
-    let skill = blocking(move || SkillStore::new(dir).get(&lookup).ok_or(format!("There is no skill named \"{lookup}\".")))
-        .await?;
+    let skill =
+        blocking(move || SkillStore::new(dir).get(&lookup).ok_or(format!("There is no skill named \"{lookup}\".")))
+            .await?;
     count_tokens(&state.fm_path(), &skill.body).await
 }
 
@@ -94,7 +96,10 @@ pub async fn count_tokens(fm_path: &str, text: &str) -> Result<u32, String> {
         return Err(error);
     }
     parse_count(&result.stdout).ok_or_else(|| {
-        format!("fm count-tokens gave an answer fmGUI could not read: {}", crate::util::truncate_chars(result.stdout.trim(), 100))
+        format!(
+            "fm count-tokens gave an answer fmGUI could not read: {}",
+            crate::util::truncate_chars(result.stdout.trim(), 100)
+        )
     })
 }
 

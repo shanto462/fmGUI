@@ -1,10 +1,10 @@
 //! Runs a child process with a timeout. The child gets its own process
 //! group, so a timeout or a cancelled chat also stops what it started.
-//! OWNER: agent "engine".
 
+use crate::util::LockExt;
 use std::process::Stdio;
-use std::time::Duration;
 use std::sync::{Arc, Mutex as StdMutex};
+use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
@@ -29,14 +29,12 @@ impl Drop for GroupGuard {
         if self.done {
             return;
         }
-        if let Some(pid) = self.pid {
-            let _ = std::process::Command::new("/bin/kill")
-                .arg("-KILL")
-                .arg(format!("-{pid}"))
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+        if let Some(pgid) = self.pid.and_then(|p| i32::try_from(p).ok()).filter(|p| *p > 1) {
+            // SAFETY: killpg(2) on the group we created for this child. The
+            // leader is not reaped yet, so the group id is still ours.
+            unsafe {
+                libc::killpg(pgid, libc::SIGKILL);
+            }
         }
     }
 }
@@ -93,7 +91,7 @@ pub async fn run_process(mut cmd: Command, stdin: Option<Vec<u8>>, timeout: Dura
             abort.abort();
         }
     }
-    let text = |buf: &Arc<StdMutex<Vec<u8>>>| crate::util::strip_ansi(&String::from_utf8_lossy(&buf.lock().unwrap()));
+    let text = |buf: &Arc<StdMutex<Vec<u8>>>| crate::util::strip_ansi(&String::from_utf8_lossy(&buf.lock_safe()));
     Ok(ProcOutput { status: status.code(), stdout: text(&stdout), stderr: text(&stderr) })
 }
 
@@ -103,7 +101,7 @@ async fn collect(mut pipe: impl AsyncRead + Unpin, buf: Arc<StdMutex<Vec<u8>>>) 
         match pipe.read(&mut chunk).await {
             Ok(0) | Err(_) => break,
             Ok(n) => {
-                let mut b = buf.lock().unwrap();
+                let mut b = buf.lock_safe();
                 let room = MAX_OUTPUT.saturating_sub(b.len());
                 b.extend_from_slice(&chunk[..n.min(room)]);
             }

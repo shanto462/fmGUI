@@ -1,7 +1,7 @@
 //! Persisted app configuration (`<app data>/config.json`).
 //!
-//! CONTRACT FILE: shared by every module and mirrored in `src/lib/types.ts`.
-//! Add fields with `#[serde(default)]` only; never rename or remove fields.
+//! Mirrored in `src/lib/types.ts`. New fields need `#[serde(default)]` so
+//! older config files still load; never rename or remove fields.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -165,8 +165,10 @@ pub enum CustomToolKind {
         #[serde(default = "default_timeout")]
         timeout_secs: u64,
     },
-    /// Runs an Apple Shortcut: `shortcuts run <name> --input-path <file>`.
-    /// The input file holds the `input` argument (or all arguments as JSON).
+    /// Runs an Apple Shortcut:
+    /// `shortcuts run [--input-path <in>] --output-path <out> -- <name>`.
+    /// The input file holds the single argument (or all arguments as JSON);
+    /// the output file is the tool result (stdout when it stays empty).
     Shortcut {
         shortcut_name: String,
         #[serde(default = "default_timeout")]
@@ -243,13 +245,7 @@ pub struct PublicServerConfig {
 
 impl Default for PublicServerConfig {
     fn default() -> Self {
-        Self {
-            mode: "tcp".into(),
-            host: "127.0.0.1".into(),
-            port: 1976,
-            socket_path: String::new(),
-            autostart: false,
-        }
+        Self { mode: "tcp".into(), host: "127.0.0.1".into(), port: 1976, socket_path: String::new(), autostart: false }
     }
 }
 
@@ -295,7 +291,12 @@ mod tests {
             id: "t1".into(),
             name: "lookup_order".into(),
             description: "Look up an order".into(),
-            params: vec![ToolParam { name: "order_id".into(), kind: ParamType::String, description: "Order id".into(), required: true }],
+            params: vec![ToolParam {
+                name: "order_id".into(),
+                kind: ParamType::String,
+                description: "Order id".into(),
+                required: true,
+            }],
             kind: CustomToolKind::Http {
                 method: "GET".into(),
                 url: "https://example.com/orders/{{order_id}}".into(),

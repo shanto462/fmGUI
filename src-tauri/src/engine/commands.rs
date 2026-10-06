@@ -1,5 +1,4 @@
-//! Tauri commands for the agent engine. OWNER: agent "engine".
-//! CONTRACT: mirrored in `src/lib/api.ts`.
+//! Tauri commands for the agent engine, mirrored in `src/lib/api.ts`.
 
 use super::{chats, router, tools, AgentEvent, Chat, ChatMessage, ChatSummary, EngineStatus, ToolInfo, ToolTestResult};
 use crate::config::CustomTool;
@@ -49,7 +48,11 @@ pub async fn chat_rename(state: State<'_, AppState>, id: String, title: String) 
 }
 
 #[tauri::command]
-pub async fn chat_set_instructions(state: State<'_, AppState>, id: String, instructions: String) -> Result<Chat, String> {
+pub async fn chat_set_instructions(
+    state: State<'_, AppState>,
+    id: String,
+    instructions: String,
+) -> Result<Chat, String> {
     chats::set_instructions(&state.engine.chats_dir, &id, &instructions)
 }
 

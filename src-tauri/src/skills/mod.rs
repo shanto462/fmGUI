@@ -1,6 +1,9 @@
 //! Skills: folders with a SKILL.md (front matter `name`, `description`, then
 //! a Markdown body). Stored in `<app data>/skills/<name>/SKILL.md`.
-//! OWNER: agent "mcp" (also owns skills). Items marked CONTRACT keep their signatures.
+//!
+//! Skill names are limited to `[a-z0-9-]`, so a name can never leave the
+//! skills folder. Types that cross the IPC boundary are mirrored in
+//! `src/lib/types.ts`.
 
 pub mod commands;
 pub mod frontmatter;
@@ -9,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// CONTRACT
+/// A skill as stored in the skills folder.
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Skill {
@@ -25,7 +28,7 @@ pub struct Skill {
     pub token_estimate: u32,
 }
 
-/// CONTRACT: create or update a skill.
+/// Input to create or update a skill.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillInput {
@@ -36,7 +39,7 @@ pub struct SkillInput {
     pub body: String,
 }
 
-/// CONTRACT: a skill found outside the app that can be imported.
+/// A skill found outside the app that can be imported.
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillCandidate {
@@ -49,7 +52,7 @@ pub struct SkillCandidate {
     pub already_imported: bool,
 }
 
-/// CONTRACT: lives in AppState.
+/// The skills folder. Lives in AppState.
 pub struct SkillStore {
     pub dir: PathBuf,
 }
@@ -148,8 +151,10 @@ fn list_files(root: &Path, skill_file: &Path) -> Vec<String> {
     out
 }
 
+/// A SKILL.md as text. Files over 2 MB (or not regular files) are ignored.
 fn read_text(path: &Path) -> Option<String> {
-    fs::read(path).ok().map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+    let bytes = crate::util::read_user_file(path, MAX_IMPORT_FILE_BYTES).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// Reads one skill folder. None when it has no readable SKILL.md.
@@ -186,9 +191,10 @@ struct CopyState {
     files: usize,
 }
 
-/// Copies a folder: skips hidden junk folders, symlinked folders, files over
-/// 2 MB, and everything after 200 files.
-fn copy_tree(src: &Path, dst: &Path, depth: usize, state: &mut CopyState) -> Result<(), String> {
+/// Copies a folder: skips hidden junk folders, symlinked folders, symlinks
+/// to files outside the skill folder (`root`), files over 2 MB, and
+/// everything after 200 files.
+fn copy_tree(root: &Path, src: &Path, dst: &Path, depth: usize, state: &mut CopyState) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("Could not create {}: {e}", dst.display()))?;
     if depth > 10 {
         return Ok(());
@@ -209,10 +215,13 @@ fn copy_tree(src: &Path, dst: &Path, depth: usize, state: &mut CopyState) -> Res
             if link_meta.file_type().is_symlink() {
                 continue; // avoid loops
             }
-            copy_tree(&path, &dst.join(&name), depth + 1, state)?;
+            copy_tree(root, &path, &dst.join(&name), depth + 1, state)?;
         } else if meta.is_file() {
             if state.files >= MAX_IMPORT_FILES || meta.len() > MAX_IMPORT_FILE_BYTES {
                 continue;
+            }
+            if link_meta.file_type().is_symlink() && !canonical(&path).starts_with(root) {
+                continue; // never copy a file from elsewhere (for example a key in ~/.ssh)
             }
             fs::copy(&path, dst.join(&name)).map_err(|e| format!("Could not copy {}: {e}", path.display()))?;
             state.files += 1;
@@ -222,12 +231,11 @@ fn copy_tree(src: &Path, dst: &Path, depth: usize, state: &mut CopyState) -> Res
 }
 
 impl SkillStore {
-    /// CONTRACT
     pub fn new(dir: PathBuf) -> Self {
         Self { dir }
     }
 
-    /// CONTRACT: all skills, sorted by name. Broken folders are skipped.
+    /// All skills, sorted by name. Broken folders are skipped.
     pub fn list(&self) -> Vec<Skill> {
         let mut skills: Vec<(bool, Skill)> = sorted_entries(&self.dir)
             .into_iter()
@@ -243,7 +251,8 @@ impl SkillStore {
         skills.into_iter().map(|(_, s)| s).collect()
     }
 
-    /// CONTRACT
+    /// The skill called `name` (any text: it is only compared, never used as a path
+    /// unless it is a valid skill name).
     pub fn get(&self, name: &str) -> Option<Skill> {
         // Fast path: the folder has the skill's name.
         if validate_name(name).is_ok() {
@@ -282,7 +291,9 @@ impl SkillStore {
             (Some(old), None) => {
                 let target = self.dir.join(name);
                 if target.exists() {
-                    return Err(format!("A folder named \"{name}\" already exists in the skills folder. Pick another name."));
+                    return Err(format!(
+                        "A folder named \"{name}\" already exists in the skills folder. Pick another name."
+                    ));
                 }
                 fs::rename(&old.path, &target).map_err(|e| format!("Could not rename the skill: {e}"))?;
                 target
@@ -402,10 +413,11 @@ impl SkillStore {
                     fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
                     fs::copy(file, staging.join(SKILL_FILE)).map_err(|e| format!("Could not copy the file: {e}"))?;
                 }
-                None => copy_tree(&src_dir, &staging, 0, &mut CopyState { files: 0 })?,
+                None => copy_tree(&src_canon, &src_dir, &staging, 0, &mut CopyState { files: 0 })?,
             }
             // The file must be called exactly SKILL.md.
-            let copied = find_skill_file(&staging).ok_or("The SKILL.md file was not copied (is it larger than 2 MB?).")?;
+            let copied =
+                find_skill_file(&staging).ok_or("The SKILL.md file was not copied (is it larger than 2 MB?).")?;
             let exact = staging.join(SKILL_FILE);
             if copied.file_name() != exact.file_name() {
                 let tmp = staging.join(".skill-rename.tmp");
@@ -525,6 +537,16 @@ mod tests {
         fs::create_dir_all(tmp.path().join("skills/empty-folder")).unwrap();
         assert_eq!(store.list().len(), 2);
 
+        // Names that try to leave the skills folder never match anything.
+        fs::create_dir_all(tmp.path().join("outside")).unwrap();
+        write(&tmp.path().join("outside/SKILL.md"), "---\nname: outside\ndescription: d\n---\nx");
+        for bad in ["../outside", "/etc", "..", ".", "", "a\0b"] {
+            assert!(store.get(bad).is_none(), "{bad:?}");
+            assert!(store.delete(bad).is_err(), "{bad:?}");
+            assert!(store.save(&input(bad, "d", "b", None)).is_err(), "{bad:?}");
+        }
+        assert!(tmp.path().join("outside/SKILL.md").exists());
+
         store.delete("other").unwrap();
         assert!(!tmp.path().join("skills/other").exists());
         assert!(store.delete("other").unwrap_err().contains("no skill"));
@@ -536,7 +558,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = SkillStore::new(tmp.path().to_path_buf());
         write(&tmp.path().join("folder-name/SKILL.md"), "Just a body, no front matter.");
-        write(&tmp.path().join("x/skill.md"), "---\nname: from-front-matter\ndescription: >\n  Folded\n  text.\n---\nBody");
+        write(
+            &tmp.path().join("x/skill.md"),
+            "---\nname: from-front-matter\ndescription: >\n  Folded\n  text.\n---\nBody",
+        );
         let skills = store.list();
         assert_eq!(skills[0].name, "folder-name");
         assert_eq!(skills[0].description, "");
@@ -551,10 +576,16 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = SkillStore::new(tmp.path().join("skills"));
         let src = tmp.path().join("claude/skills/pdf");
-        write(&src.join("SKILL.md"), "---\nname: pdf\ndescription: Work with PDF files.\nlicense: MIT\n---\nUse pdftotext.");
+        write(
+            &src.join("SKILL.md"),
+            "---\nname: pdf\ndescription: Work with PDF files.\nlicense: MIT\n---\nUse pdftotext.",
+        );
         write(&src.join("scripts/fill.py"), "print('fill')");
         write(&src.join(".git/HEAD"), "ref");
         fs::write(src.join("big.bin"), vec![0u8; (MAX_IMPORT_FILE_BYTES + 1) as usize]).unwrap();
+        write(&tmp.path().join("private/secret.txt"), "secret");
+        std::os::unix::fs::symlink(tmp.path().join("private/secret.txt"), src.join("stolen.txt")).unwrap();
+        std::os::unix::fs::symlink(src.join("scripts/fill.py"), src.join("alias.py")).unwrap();
 
         // Candidates.
         let sources = vec![(tmp.path().join("claude/skills"), "~/.claude/skills".to_string())];
@@ -567,14 +598,19 @@ mod tests {
         // Import by folder.
         let skill = store.import(&src.display().to_string()).unwrap();
         assert_eq!(skill.name, "pdf");
-        assert_eq!(skill.files, vec!["scripts/fill.py".to_string()]);
+        assert_eq!(skill.files, vec!["alias.py".to_string(), "scripts/fill.py".to_string()]);
         assert!(!tmp.path().join("skills/pdf/.git").exists());
         assert!(!tmp.path().join("skills/pdf/big.bin").exists());
+        assert!(!tmp.path().join("skills/pdf/stolen.txt").exists(), "links to files outside are not copied");
+        assert!(tmp.path().join("skills/pdf/alias.py").is_file(), "links inside the skill are copied");
         assert!(store.import_candidates(&sources)[0].already_imported);
         // Same name again is refused.
         assert!(store.import(&src.join("SKILL.md").display().to_string()).unwrap_err().contains("already exists"));
         // No staging folders left behind.
-        assert!(fs::read_dir(tmp.path().join("skills")).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().starts_with(".import")));
+        assert!(fs::read_dir(tmp.path().join("skills"))
+            .unwrap()
+            .flatten()
+            .all(|e| !e.file_name().to_string_lossy().starts_with(".import")));
 
         // Import a SKILL.md path whose name is not valid: it gets a clean name.
         let odd = tmp.path().join("agents/skills/Odd_Skill");

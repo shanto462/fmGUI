@@ -1,7 +1,7 @@
 //! JSON-RPC 2.0 framing for MCP: building messages, classifying what the
 //! server sends, matching responses to requests, and the small log tail.
-//! OWNER: agent "mcp".
 
+use crate::util::LockExt;
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -82,10 +82,20 @@ impl CallError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Incoming {
     /// An answer to one of our requests.
-    Response { id: u64, result: Result<Value, RpcError> },
+    Response {
+        id: u64,
+        result: Result<Value, RpcError>,
+    },
     /// The server asks us something (ping, roots/list, ...).
-    Request { id: Value, method: String, params: Value },
-    Notification { method: String, params: Value },
+    Request {
+        id: Value,
+        method: String,
+        params: Value,
+    },
+    Notification {
+        method: String,
+        params: Value,
+    },
     /// Valid JSON that is not a message we can use (for example a response with a null id).
     Unknown(Value),
 }
@@ -177,7 +187,7 @@ pub struct PendingMap(Arc<Mutex<PendingInner>>);
 impl PendingMap {
     /// Registers a waiter. Fails when the connection is already closed.
     pub fn insert(&self, id: u64) -> Result<oneshot::Receiver<Result<Value, CallError>>, CallError> {
-        let mut inner = self.0.lock().unwrap();
+        let mut inner = self.0.lock_safe();
         if let Some(reason) = &inner.closed {
             return Err(CallError::Closed(reason.clone()));
         }
@@ -187,12 +197,12 @@ impl PendingMap {
     }
 
     pub fn remove(&self, id: u64) {
-        self.0.lock().unwrap().waiters.remove(&id);
+        self.0.lock_safe().waiters.remove(&id);
     }
 
     /// Delivers a response. Returns false when nobody waits for this id.
     pub fn resolve(&self, id: u64, result: Result<Value, RpcError>) -> bool {
-        let waiter = self.0.lock().unwrap().waiters.remove(&id);
+        let waiter = self.0.lock_safe().waiters.remove(&id);
         match waiter {
             Some(tx) => {
                 let _ = tx.send(result.map_err(CallError::Rpc));
@@ -206,7 +216,7 @@ impl PendingMap {
     /// Returns false when it was already closed.
     pub fn close(&self, reason: &str) -> bool {
         let waiters = {
-            let mut inner = self.0.lock().unwrap();
+            let mut inner = self.0.lock_safe();
             if inner.closed.is_some() {
                 return false;
             }
@@ -220,11 +230,12 @@ impl PendingMap {
     }
 
     pub fn closed_reason(&self) -> Option<String> {
-        self.0.lock().unwrap().closed.clone()
+        self.0.lock_safe().closed.clone()
     }
 
-    pub fn len(&self) -> usize {
-        self.0.lock().unwrap().waiters.len()
+    /// Requests still waiting for an answer.
+    pub fn waiting(&self) -> usize {
+        self.0.lock_safe().waiters.len()
     }
 }
 
@@ -249,7 +260,7 @@ impl LogTail {
         } else {
             line.to_string()
         };
-        let mut q = self.0.lock().unwrap();
+        let mut q = self.0.lock_safe();
         if q.len() == TAIL_LINES {
             q.pop_front();
         }
@@ -257,12 +268,12 @@ impl LogTail {
     }
 
     pub fn snapshot(&self) -> Vec<String> {
-        self.0.lock().unwrap().iter().cloned().collect()
+        self.0.lock_safe().iter().cloned().collect()
     }
 
     /// The last `n` lines, oldest first.
     pub fn last(&self, n: usize) -> Vec<String> {
-        let q = self.0.lock().unwrap();
+        let q = self.0.lock_safe();
         q.iter().skip(q.len().saturating_sub(n)).cloned().collect()
     }
 }
@@ -318,9 +329,12 @@ mod tests {
         assert_eq!(req, Incoming::Request { id: json!("srv-1"), method: "ping".into(), params: Value::Null });
 
         let note = classify(json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}));
-        assert!(matches!(note, Incoming::Notification { ref method, .. } if method == "notifications/tools/list_changed"));
+        assert!(
+            matches!(note, Incoming::Notification { ref method, .. } if method == "notifications/tools/list_changed")
+        );
 
-        let null_id = classify(json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "Parse error"}}));
+        let null_id =
+            classify(json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "Parse error"}}));
         assert!(matches!(null_id, Incoming::Unknown(_)));
     }
 
@@ -352,7 +366,7 @@ mod tests {
         assert!(!pending.close("again"));
         assert_eq!(rx1.await.unwrap(), Err(CallError::Closed("The server stopped (exit code 1).".into())));
         assert!(matches!(pending.insert(3), Err(CallError::Closed(_))));
-        assert_eq!(pending.len(), 0);
+        assert_eq!(pending.waiting(), 0);
     }
 
     #[test]

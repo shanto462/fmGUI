@@ -1,6 +1,7 @@
 //! SKILL.md front matter: a small YAML subset (top-level `key: value`,
 //! quoted values, `|` / `>` block scalars, multi-line plain values).
-//! OWNER: agent "mcp".
+//! SKILL.md files come from anywhere (imports from `~/.claude/skills`), so
+//! the parser must never panic on odd input.
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FrontMatter {
@@ -124,19 +125,16 @@ fn block_scalar(header: &str, more: &[&str]) -> String {
     let indicators = indicators.split('#').next().unwrap_or("").trim();
     let keep = indicators.contains('+');
     let strip = indicators.contains('-');
-    let explicit_indent: Option<usize> = indicators.chars().find(|c| c.is_ascii_digit()).and_then(|c| c.to_digit(10)).map(|d| d as usize);
+    let explicit_indent: Option<usize> =
+        indicators.chars().find(|c| c.is_ascii_digit()).and_then(|c| c.to_digit(10)).map(|d| d as usize);
 
-    let indent = explicit_indent.unwrap_or_else(|| {
-        more.iter()
-            .filter(|l| !l.trim().is_empty())
-            .map(|l| l.len() - l.trim_start().len())
-            .min()
-            .unwrap_or(0)
-    });
-    let content: Vec<&str> = more
-        .iter()
-        .map(|l| if l.trim().is_empty() { "" } else if l.len() >= indent { &l[indent..] } else { l.trim_start() })
-        .collect();
+    // Indentation is ASCII spaces and tabs only, so cutting it never splits
+    // a multi-byte character.
+    let indent_of = |l: &str| l.bytes().take_while(|b| *b == b' ' || *b == b'\t').count();
+    let indent = explicit_indent
+        .unwrap_or_else(|| more.iter().filter(|l| !l.trim().is_empty()).map(|l| indent_of(l)).min().unwrap_or(0));
+    let content: Vec<&str> =
+        more.iter().map(|l| if l.trim().is_empty() { "" } else { &l[indent_of(l).min(indent)..] }).collect();
 
     let mut out = String::new();
     if folded {
@@ -239,7 +237,8 @@ fn single_quoted(inner: &str) -> String {
 /// A YAML scalar for `value`: plain when that is safe, else double-quoted
 /// (JSON escapes are valid YAML double-quoted escapes).
 pub fn yaml_scalar(value: &str) -> String {
-    const SPECIAL_START: &[char] = &['-', '?', ':', ',', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`', ' '];
+    const SPECIAL_START: &[char] =
+        &['-', '?', ':', ',', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`', ' '];
     let lower = value.to_ascii_lowercase();
     let reserved = matches!(lower.as_str(), "true" | "false" | "yes" | "no" | "on" | "off" | "null" | "~")
         || value.parse::<f64>().is_ok();
@@ -325,7 +324,8 @@ mod tests {
 
     #[test]
     fn plain_values() {
-        let (name, desc, body) = fm("---\nname: pdf-tools\ndescription: Fill and read PDF forms.\n---\n\n# PDF\nUse it.\n");
+        let (name, desc, body) =
+            fm("---\nname: pdf-tools\ndescription: Fill and read PDF forms.\n---\n\n# PDF\nUse it.\n");
         assert_eq!(name.as_deref(), Some("pdf-tools"));
         assert_eq!(desc.as_deref(), Some("Fill and read PDF forms."));
         assert_eq!(body, "# PDF\nUse it.");
@@ -366,7 +366,8 @@ mod tests {
 
     #[test]
     fn crlf_bom_and_no_front_matter() {
-        let (name, desc, body) = fm("\u{FEFF}---\r\nname: win\r\ndescription: From Windows\r\n---\r\nLine 1\r\nLine 2\r\n");
+        let (name, desc, body) =
+            fm("\u{FEFF}---\r\nname: win\r\ndescription: From Windows\r\n---\r\nLine 1\r\nLine 2\r\n");
         assert_eq!(name.as_deref(), Some("win"));
         assert_eq!(desc.as_deref(), Some("From Windows"));
         assert_eq!(body, "Line 1\nLine 2");
@@ -379,6 +380,18 @@ mod tests {
         let (name, _, body) = fm("---\nname: broken\nno end");
         assert_eq!(name, None);
         assert!(body.starts_with("---"));
+    }
+
+    #[test]
+    fn odd_indentation_never_panics() {
+        // Explicit indent that lands inside a multi-byte character.
+        let (_, desc, _) = fm("---\ndescription: |4\n  xéé\n---\n");
+        assert!(desc.is_some());
+        // Unicode spaces in the indentation (ideographic space, no-break space).
+        let (_, desc, _) = fm("---\ndescription: >\n  first\n\u{3000}second\n \u{a0}third\n---\n");
+        assert!(desc.unwrap().contains("first"));
+        let (_, desc, _) = fm("---\ndescription: |9\n é\n---\n");
+        assert!(desc.is_some());
     }
 
     #[test]

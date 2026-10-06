@@ -1,7 +1,6 @@
 //! Tests against the real `/usr/bin/fm`. They only run with `FM_INTEGRATION=1`
 //! (they need macOS 27, the agreed license and the on-device model):
 //! `FM_INTEGRATION=1 cargo test fm::integration_tests`
-//! OWNER: agent "cli".
 
 use super::public_server::{EventSink, PublicServer, ServerEvent};
 use super::*;
@@ -161,11 +160,8 @@ async fn public_server_on_socket() {
 
     let server = PublicServer::default();
     let (sink, events) = collecting_sink();
-    let config = PublicServerConfig {
-        mode: "socket".into(),
-        socket_path: socket.display().to_string(),
-        ..Default::default()
-    };
+    let config =
+        PublicServerConfig { mode: "socket".into(), socket_path: socket.display().to_string(), ..Default::default() };
     let status = server.start_with(FM, &config, sink.clone()).await.unwrap();
     let result = async {
         assert!(status.running && status.pid.is_some(), "{status:?}");

@@ -1,5 +1,4 @@
 //! Agent chat storage: one JSON file per chat in `<data>/chats/<id>.json`.
-//! OWNER: agent "engine".
 
 use super::{Chat, ChatSummary};
 use crate::util::{new_id, now_ms};
@@ -10,7 +9,8 @@ pub const NEW_CHAT_TITLE: &str = "New chat";
 const TITLE_MAX: usize = 48;
 const PREVIEW_MAX: usize = 120;
 
-/// Chat ids are UUIDs; anything else could escape the folder.
+/// Chat ids are UUIDs. Only `[A-Za-z0-9_-]` is accepted, so an id from the
+/// UI (or from inside a chat file) can never name a path outside the folder.
 fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
@@ -176,6 +176,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(load(dir.path(), "../config").is_err());
         assert!(chat_path(dir.path(), "a/b").is_err());
+        for bad in ["..", ".", "", "/etc/passwd", "a\\b", "a\0b", "~", "x.json", &"a".repeat(65)] {
+            assert!(chat_path(dir.path(), bad).is_err(), "{bad:?}");
+            assert!(delete(dir.path(), bad).is_err(), "{bad:?}");
+            assert!(rename(dir.path(), bad, "t").is_err(), "{bad:?}");
+        }
+        // A saved chat with a bad id is refused too (ids inside files are not trusted).
+        let chat = Chat { id: "../escape".into(), ..Default::default() };
+        assert!(save(dir.path(), &chat).is_err());
+        assert!(!dir.path().parent().unwrap().join("escape.json").exists());
     }
 
     #[test]

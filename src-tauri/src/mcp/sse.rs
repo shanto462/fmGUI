@@ -1,5 +1,4 @@
 //! Incremental Server-Sent Events parser (for Streamable HTTP responses).
-//! OWNER: agent "mcp".
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SseEvent {
@@ -49,8 +48,7 @@ impl SseParser {
     }
 
     fn drain_lines(&mut self, at_end: bool, out: &mut Vec<SseEvent>) {
-        loop {
-            let Some(pos) = self.buf.iter().position(|b| *b == b'\n' || *b == b'\r') else { break };
+        while let Some(pos) = self.buf.iter().position(|b| *b == b'\n' || *b == b'\r') {
             let skip = if self.buf[pos] == b'\r' {
                 match self.buf.get(pos + 1) {
                     Some(b'\n') => 2,

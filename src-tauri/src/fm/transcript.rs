@@ -1,7 +1,6 @@
 //! Parser for FoundationModels transcript JSON (`--save-transcript` files and
 //! `~/.fm/sessions/*.json`). Must be lenient: unknown fields and roles are kept
 //! as best as possible, never fail on them.
-//! OWNER: agent "cli".
 //!
 //! Shapes seen in files written by fm 27.0.1:
 //! - text:       `{"type":"text","text":"..."}`
@@ -15,7 +14,10 @@
 use serde::Serialize;
 use serde_json::Value;
 
-/// CONTRACT
+/// Largest transcript file we read (images inside make them big).
+pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// One entry of a transcript, as shown in the UI.
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptMessage {
@@ -27,7 +29,7 @@ pub struct TranscriptMessage {
     pub images: Vec<String>,
 }
 
-/// CONTRACT
+/// A whole transcript file.
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ParsedTranscript {
@@ -38,10 +40,9 @@ pub struct ParsedTranscript {
     pub system_version: Option<String>,
 }
 
-/// CONTRACT
+/// Parses transcript JSON. Fails only when the file is not JSON or has no entries.
 pub fn parse(bytes: &[u8]) -> Result<ParsedTranscript, String> {
-    let root: Value =
-        serde_json::from_slice(bytes).map_err(|e| format!("This file is not valid JSON ({e})."))?;
+    let root: Value = serde_json::from_slice(bytes).map_err(|e| format!("This file is not valid JSON ({e})."))?;
     let entries = find_entries(&root).ok_or_else(|| "This file does not look like an fm transcript.".to_string())?;
 
     let mut parsed = ParsedTranscript {
@@ -61,16 +62,9 @@ pub fn parse(bytes: &[u8]) -> Result<ParsedTranscript, String> {
             continue;
         }
         if role == "response" && parsed.system_version.is_none() {
-            parsed.system_version = entry
-                .pointer("/metadata/systemVersion")
-                .and_then(Value::as_str)
-                .map(String::from);
+            parsed.system_version = entry.pointer("/metadata/systemVersion").and_then(Value::as_str).map(String::from);
         }
-        let id = entry
-            .get("id")
-            .and_then(Value::as_str)
-            .map(String::from)
-            .unwrap_or_else(crate::util::new_id);
+        let id = entry.get("id").and_then(Value::as_str).map(String::from).unwrap_or_else(crate::util::new_id);
         parsed.messages.push(TranscriptMessage { id, role, text, images });
     }
 

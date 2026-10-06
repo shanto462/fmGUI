@@ -1,9 +1,14 @@
 //! stdio transport: the server is a child process; newline-delimited JSON on
-//! stdin/stdout, stderr goes to the log tail. OWNER: agent "mcp".
+//! stdin/stdout, stderr goes to the log tail.
+//!
+//! The server runs in its own process group (npx starts node as a child), and
+//! the group id is written to a pid file while it runs, so a later start of
+//! the app can stop a server that was left behind by a crash.
 
 use super::client::{handle_notification, ClientEvent};
 use super::errors;
 use super::rpc::{self, CallError, Incoming, LogTail, PendingMap};
+use crate::util::LockExt;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -23,7 +28,13 @@ pub struct StdioSpec {
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
     pub cwd: Option<String>,
+    /// Where the process group id is recorded while the server runs.
+    pub pid_file: Option<PathBuf>,
 }
+
+/// How long one write to the server's stdin may take. A server that stops
+/// reading would otherwise block the caller forever once the pipe is full.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct Shared {
     pending: PendingMap,
@@ -51,25 +62,28 @@ pub struct StdioTransport {
     supervisor: std::sync::Mutex<Option<JoinHandle<()>>>,
 }
 
-async fn write_line(stdin: &SharedStdin, msg: &Value) -> Result<(), String> {
+/// Writes one JSON message and a newline, waiting at most `limit`.
+async fn write_line(stdin: &SharedStdin, msg: &Value, limit: Duration) -> Result<(), String> {
     let mut line = serde_json::to_vec(msg).map_err(|e| e.to_string())?;
     line.push(b'\n');
-    let mut guard = stdin.lock().await;
-    let Some(pipe) = guard.as_mut() else { return Err("The server is not running.".into()) };
-    pipe.write_all(&line).await.map_err(|e| format!("Could not send to the server: {e}"))?;
-    pipe.flush().await.map_err(|e| format!("Could not send to the server: {e}"))
+    let write = async {
+        let mut guard = stdin.lock().await;
+        let Some(pipe) = guard.as_mut() else { return Err("The server is not running.".to_string()) };
+        pipe.write_all(&line).await.map_err(|e| format!("Could not send to the server: {e}"))?;
+        pipe.flush().await.map_err(|e| format!("Could not send to the server: {e}"))
+    };
+    tokio::time::timeout(limit, write)
+        .await
+        .unwrap_or_else(|_| Err("The server stopped reading its input, so the message could not be sent.".into()))
 }
 
 /// Sends a signal to the whole process group (npx starts node as a child).
-async fn signal_group(pid: Option<u32>, signal: &str) {
-    if let Some(pid) = pid {
-        let _ = Command::new("/bin/kill")
-            .args([signal, "--", &format!("-{pid}")])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await;
+fn signal_group(pid: Option<u32>, signal: i32) {
+    if let Some(pgid) = pid.and_then(|p| i32::try_from(p).ok()).filter(|p| *p > 1) {
+        // SAFETY: killpg(2) with a positive group id we created.
+        unsafe {
+            libc::killpg(pgid, signal);
+        }
     }
 }
 
@@ -81,9 +95,7 @@ impl StdioTransport {
     ) -> Result<Self, String> {
         // The login shell environment (PATH from nvm, Homebrew, ...). The first
         // call runs the shell, so keep it off the async threads.
-        let mut env: HashMap<String, String> = tokio::task::spawn_blocking(|| crate::util::login_env().clone())
-            .await
-            .map_err(|e| e.to_string())?;
+        let mut env: HashMap<String, String> = crate::util::login_env_async().await.clone();
         for (k, v) in &spec.env {
             if !k.trim().is_empty() {
                 env.insert(k.trim().to_string(), v.clone());
@@ -125,6 +137,10 @@ impl StdioTransport {
         if let Some(dir) = &cwd {
             cmd.current_dir(dir);
         }
+        // A server with this id left behind by a crash of an earlier run.
+        if let Some(pid_file) = spec.pid_file.clone() {
+            let _ = tokio::task::spawn_blocking(move || crate::procs::reap_pid_file(&pid_file)).await;
+        }
         let mut child: Child = cmd.spawn().map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => errors::command_not_found(&command),
             std::io::ErrorKind::PermissionDenied => {
@@ -133,6 +149,15 @@ impl StdioTransport {
             _ => format!("Could not start {command}: {e}"),
         })?;
         let pid = child.id();
+        if let (Some(pid_file), Some(pid)) = (spec.pid_file.clone(), pid) {
+            let program_text = program.display().to_string();
+            let first_arg = args.first().cloned().unwrap_or_default();
+            let _ = tokio::task::spawn_blocking(move || {
+                crate::procs::write_pid_file(&pid_file, pid, true, &program_text, &first_arg)
+            })
+            .await;
+        }
+        let pid_file = spec.pid_file.clone();
 
         let stdin: SharedStdin = Arc::new(Mutex::new(child.stdin.take()));
         let stdout = child.stdout.take().ok_or("Could not read the server output.")?;
@@ -209,7 +234,7 @@ impl StdioTransport {
                             }
                             Incoming::Request { id, method, .. } => {
                                 let reply = rpc::reply_to_server_request(&id, &method);
-                                if let Err(err) = write_line(&stdin, &reply).await {
+                                if let Err(err) = write_line(&stdin, &reply, WRITE_TIMEOUT).await {
                                     shared.tail.push(&err);
                                 }
                             }
@@ -250,11 +275,11 @@ impl StdioTransport {
                         match tokio::time::timeout(Duration::from_millis(1500), child.wait()).await {
                             Ok(s) => s.ok(),
                             Err(_) => {
-                                signal_group(pid, "-TERM").await;
+                                signal_group(pid, libc::SIGTERM);
                                 match tokio::time::timeout(Duration::from_millis(1000), child.wait()).await {
                                     Ok(s) => s.ok(),
                                     Err(_) => {
-                                        signal_group(pid, "-KILL").await;
+                                        signal_group(pid, libc::SIGKILL);
                                         let _ = child.kill().await;
                                         child.wait().await.ok()
                                     }
@@ -271,6 +296,12 @@ impl StdioTransport {
                     let _ = tokio::time::timeout(Duration::from_millis(100), stderr_task).await;
                 }
                 let code = status.and_then(|s| s.code());
+                // Children of a server that exited on its own (npx → node) would
+                // otherwise keep running without a parent.
+                signal_group(pid, libc::SIGTERM);
+                if let Some(pid_file) = &pid_file {
+                    crate::procs::remove_pid_file(pid_file);
+                }
                 let _ = exit_tx.send(Some(code));
                 let reason = errors::exit_message(code, &shared.tail.last(20));
                 shared.finish(reason);
@@ -282,7 +313,7 @@ impl StdioTransport {
 
     pub async fn request(&self, id: u64, method: &str, params: Value, timeout: Duration) -> Result<Value, CallError> {
         let rx = self.shared.pending.insert(id)?;
-        if let Err(err) = write_line(&self.stdin, &rpc::request(id, method, params)).await {
+        if let Err(err) = write_line(&self.stdin, &rpc::request(id, method, params), timeout.min(WRITE_TIMEOUT)).await {
             self.shared.pending.remove(id);
             return Err(CallError::Closed(self.shared.pending.closed_reason().unwrap_or(err)));
         }
@@ -303,7 +334,7 @@ impl StdioTransport {
         if let Some(reason) = self.shared.pending.closed_reason() {
             return Err(CallError::Closed(reason));
         }
-        write_line(&self.stdin, &rpc::notification(method, params)).await.map_err(CallError::Failed)
+        write_line(&self.stdin, &rpc::notification(method, params), WRITE_TIMEOUT).await.map_err(CallError::Failed)
     }
 
     /// Stops the server: close stdin, wait a little, then TERM, then KILL.
@@ -311,7 +342,7 @@ impl StdioTransport {
         self.shared.closing.store(true, Ordering::SeqCst);
         self.stdin.lock().await.take();
         self.stop.cancel();
-        let handle = self.supervisor.lock().unwrap().take();
+        let handle = self.supervisor.lock_safe().take();
         if let Some(handle) = handle {
             let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
         }

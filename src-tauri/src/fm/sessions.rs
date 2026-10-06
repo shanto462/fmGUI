@@ -1,10 +1,9 @@
 //! CLI chat sessions in `~/.fm/sessions/` (shared with `fm chat`).
-//! OWNER: agent "cli".
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-/// CONTRACT
+/// One saved `fm chat` session.
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CliSession {
@@ -21,7 +20,7 @@ pub struct CliSession {
 
 const PREVIEW_CHARS: usize = 80;
 
-/// CONTRACT: newest first. Missing folder → empty list.
+/// All sessions, newest first. Missing folder → empty list.
 pub fn list(dir: &Path) -> Result<Vec<CliSession>, String> {
     let read_dir = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
@@ -56,8 +55,10 @@ pub fn list(dir: &Path) -> Result<Vec<CliSession>, String> {
             size_bytes: meta.len(),
             ..Default::default()
         };
-        // Unreadable or broken files are still listed, with an empty preview.
-        if let Ok(parsed) = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| super::transcript::parse(&b)) {
+        // Unreadable, broken or huge files are still listed, with an empty preview.
+        let parsed = crate::util::read_user_file(&path, super::transcript::MAX_FILE_BYTES)
+            .and_then(|b| super::transcript::parse(&b));
+        if let Ok(parsed) = parsed {
             let users: Vec<_> = parsed.messages.iter().filter(|m| m.role == "user").collect();
             session.turns = users.len() as u32;
             if let Some(first) = users.first() {
@@ -83,7 +84,8 @@ fn preview(text: &str, has_images: bool) -> String {
     format!("{}…", cut.trim_end())
 }
 
-/// CONTRACT: same rules as fm: not empty, not "." or "..", no '/', '\\' or NUL.
+/// Same rules as fm: not empty, not "." or "..", no '/', '\\' or NUL.
+/// This keeps every session path inside the sessions folder.
 pub fn is_valid_name(name: &str) -> bool {
     !(name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']))
 }
@@ -207,5 +209,11 @@ mod tests {
         assert!(session_path(dir, "../evil").is_err());
         assert!(session_path(dir, "..").is_err());
         assert!(session_path(dir, "").is_err());
+        for bad in ["/etc/passwd", "a/../../b", "..\\x", "x\0y", "  ..  ", ".json", "...json"] {
+            let result = session_path(dir, bad);
+            assert!(result.as_ref().map(|p| p.parent() == Some(dir)).unwrap_or(true), "{bad:?} → {result:?}");
+        }
+        assert!(session_path(dir, "/etc/passwd").is_err());
+        assert!(session_path(dir, "x\0y").is_err());
     }
 }

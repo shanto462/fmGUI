@@ -1,6 +1,5 @@
 //! Turns raw output chunks into clean text: UTF-8 safe across chunk
 //! boundaries, ANSI stripped even when an escape sequence is split.
-//! OWNER: agent "cli".
 
 /// Longest escape sequence we hold back while waiting for its end.
 const MAX_PENDING_ESCAPE: usize = 256;

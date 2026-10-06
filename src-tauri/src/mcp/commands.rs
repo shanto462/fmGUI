@@ -1,4 +1,4 @@
-//! Tauri commands for MCP. OWNER: agent "mcp". CONTRACT: mirrored in `src/lib/api.ts`.
+//! Tauri commands for MCP, mirrored in `src/lib/api.ts`.
 
 use super::{McpServerStatus, McpTestResult};
 use crate::config::McpServerConfig;
@@ -15,7 +15,11 @@ pub async fn mcp_statuses(state: State<'_, AppState>) -> Result<Vec<McpServerSta
 
 /// Connects the saved server with this id.
 #[tauri::command]
-pub async fn mcp_connect(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<Vec<McpServerStatus>, String> {
+pub async fn mcp_connect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<McpServerStatus>, String> {
     let configs = state.config().mcp_servers;
     let config = configs.iter().find(|c| c.id == id).ok_or("This MCP server is not saved yet. Save it first.")?;
     state.mcp.connect(&app, config).await?;
@@ -23,7 +27,11 @@ pub async fn mcp_connect(app: AppHandle, state: State<'_, AppState>, id: String)
 }
 
 #[tauri::command]
-pub async fn mcp_disconnect(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<Vec<McpServerStatus>, String> {
+pub async fn mcp_disconnect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<McpServerStatus>, String> {
     state.mcp.disconnect(&app, &id).await;
     let configs = state.config().mcp_servers;
     Ok(state.mcp.statuses(&configs).await)

@@ -1,10 +1,9 @@
 //! Model availability, license status, macOS version.
-//! OWNER: agent "cli".
 
 use serde::Serialize;
 use std::process::Stdio;
 
-/// CONTRACT
+/// Everything the Setup page checks.
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct FmStatus {
@@ -22,7 +21,7 @@ pub struct FmStatus {
     pub context_size: u32,
 }
 
-/// CONTRACT
+/// Runs `fm available`, `fm license --status` and `sw_vers` in parallel.
 pub async fn check(fm_path: &str, context_size: u32) -> FmStatus {
     let mut status = FmStatus { binary_path: fm_path.to_string(), context_size, ..Default::default() };
 
@@ -43,11 +42,8 @@ pub async fn check(fm_path: &str, context_size: u32) -> FmStatus {
 
     let available_args = vec!["available".to_string()];
     let license_args = vec!["license".to_string(), "--status".to_string()];
-    let ((version, build), available, license) = tokio::join!(
-        os,
-        super::run_collect(fm_path, &available_args),
-        super::run_collect(fm_path, &license_args),
-    );
+    let ((version, build), available, license) =
+        tokio::join!(os, super::run_collect(fm_path, &available_args), super::run_collect(fm_path, &license_args),);
     status.macos_version = version;
     status.macos_build = build;
 
@@ -89,14 +85,14 @@ fn is_executable(path: &str) -> bool {
 }
 
 async fn sw_vers(flag: &str) -> String {
-    let out = tokio::process::Command::new("/usr/bin/sw_vers")
+    let run = tokio::process::Command::new("/usr/bin/sw_vers")
         .arg(flag)
         .stdin(Stdio::null())
         .stderr(Stdio::null())
-        .output()
-        .await;
-    match out {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        .kill_on_drop(true)
+        .output();
+    match tokio::time::timeout(std::time::Duration::from_secs(10), run).await {
+        Ok(Ok(o)) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         _ => String::new(),
     }
 }

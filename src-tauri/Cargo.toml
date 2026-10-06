@@ -1,11 +1,17 @@
 [package]
 name = "fmgui"
 version = "0.1.0"
-description = "A macOS 27 app for Apple's fm CLI (Foundation Models)"
+description = "A macOS 27 desktop app for Apple's fm CLI (on-device Foundation Models): chat with tools, MCP servers and skills"
 authors = ["Shanto"]
+license = "MIT"
+repository = "https://github.com/shanto462/fmGUI"
+readme = "../README.md"
+keywords = ["tauri", "macos", "foundation-models", "llm", "mcp"]
+categories = ["gui"]
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# The oldest Rust the dependency tree supports (Tauri 2.12 needs 1.90).
+rust-version = "1.90"
+publish = false
 
 [lib]
 # Library + thin binary (tests use the library). macOS only, so no
@@ -18,10 +24,11 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri-plugin-dialog = "2"
 tokio = { version = "1.53.2", features = ["full"] }
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
@@ -30,23 +37,21 @@ bytes = "1.12.1"
 futures-util = "0.3.34"
 regex = "1.13.1"
 base64 = "0.23.1"
-anyhow = "1.0.104"
-thiserror = "2.0.21"
 dirs = "7.0.0"
 evalexpr = "13.1.0"
 tokio-util = "0.7.19"
 uuid = { version = "1.27.0", features = ["v4"] }
-chrono = { version = "0.4.45", features = ["serde"] }
+chrono = "0.4.45"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+libc = "0.2"
 
+[dev-dependencies]
+tempfile = "3.27.0"
 
-# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+# See https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
 codegen-units = 1
 lto = true
 opt-level = 3
 panic = "abort"
 strip = true
-
-[dev-dependencies]
-tempfile = "3.27.0"

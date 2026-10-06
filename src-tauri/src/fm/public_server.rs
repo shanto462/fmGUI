@@ -1,5 +1,4 @@
 //! The user-facing `fm serve` instance (Server page), for other apps to use.
-//! OWNER: agent "cli".
 //! Events: "public-server-log" (LogLine) for each output line,
 //!         "public-server-state" (PublicServerStatus) on start/stop/exit.
 //!
@@ -9,9 +8,13 @@
 //! stdout and stderr into log lines. `NSUnbufferedIO=YES` is set because
 //! `fm serve` buffers its log when stdout is a pipe (lines would only show up
 //! at exit).
+//!
+//! A pid file (`<data>/public-server.pid`) lets the next start stop a server
+//! that was left running when the app was killed.
 
 use super::commands::HttpResult;
 use crate::config::PublicServerConfig;
+use crate::util::LockExt;
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -23,7 +26,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufRead
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-/// CONTRACT
+/// One line the server printed (stdout or stderr), with its time.
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct LogLine {
@@ -31,7 +34,7 @@ pub struct LogLine {
     pub line: String,
 }
 
-/// CONTRACT
+/// State of the public server for the Server page.
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicServerStatus {
@@ -50,6 +53,9 @@ pub struct PublicServerStatus {
 const MAX_LOGS: usize = 500;
 const READY_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+/// Largest reply the "Try it" panel reads.
+const MAX_REPLY_BYTES: usize = 8 * 1024 * 1024;
+const TOO_LARGE: &str = "The reply is larger than 8 MB, so it was not read.";
 /// macOS limit for a Unix socket path (104 bytes including the final NUL).
 const MAX_SOCKET_PATH: usize = 103;
 
@@ -83,15 +89,15 @@ struct Shared {
 
 impl Shared {
     fn snapshot(&self) -> PublicServerStatus {
-        let mut status = self.status.lock().unwrap().clone();
-        status.logs = self.logs.lock().unwrap().iter().cloned().collect();
+        let mut status = self.status.lock_safe().clone();
+        status.logs = self.logs.lock_safe().iter().cloned().collect();
         status
     }
 
     fn push_log(&self, line: String, sink: &EventSink) {
         let entry = LogLine { ts: crate::util::now_ms(), line };
         {
-            let mut logs = self.logs.lock().unwrap();
+            let mut logs = self.logs.lock_safe();
             if logs.len() >= MAX_LOGS {
                 logs.pop_front();
             }
@@ -102,7 +108,7 @@ impl Shared {
 
     /// Log lines written since `since_ms`, newest last.
     fn lines_since(&self, since_ms: i64) -> Vec<String> {
-        self.logs.lock().unwrap().iter().filter(|l| l.ts >= since_ms).map(|l| l.line.clone()).collect()
+        self.logs.lock_safe().iter().filter(|l| l.ts >= since_ms).map(|l| l.line.clone()).collect()
     }
 }
 
@@ -112,11 +118,13 @@ struct Running {
     watcher: JoinHandle<()>,
 }
 
-/// CONTRACT: holds the child process. Must kill it on `stop` and on app exit.
+/// Owns the `fm serve` child. It is stopped on `stop` and on app exit.
 #[derive(Default)]
 pub struct PublicServer {
     running: tokio::sync::Mutex<Option<Running>>,
     shared: Arc<Shared>,
+    /// Where the pid of the running server is written (none in tests).
+    pid_file: Option<PathBuf>,
 }
 
 /// Where the server listens.
@@ -127,7 +135,12 @@ enum Target {
 }
 
 impl PublicServer {
-    /// CONTRACT: kill the child if running. Called on app exit.
+    /// A server that records its pid in `pid_file` while it runs.
+    pub fn with_pid_file(pid_file: PathBuf) -> Self {
+        Self { pid_file: Some(pid_file), ..Default::default() }
+    }
+
+    /// Stops the child if it runs. Called on app exit.
     pub async fn shutdown(&self) {
         let running = self.running.lock().await.take();
         if let Some(running) = running {
@@ -143,7 +156,12 @@ impl PublicServer {
 
     /// Starts `fm serve` (stops a running one first) and waits up to 5 s until
     /// it answers. Emits "public-server-state".
-    pub async fn start(&self, app: &AppHandle, fm_path: &str, config: &PublicServerConfig) -> Result<PublicServerStatus, String> {
+    pub async fn start(
+        &self,
+        app: &AppHandle,
+        fm_path: &str,
+        config: &PublicServerConfig,
+    ) -> Result<PublicServerStatus, String> {
         self.start_with(fm_path, config, app_sink(app)).await
     }
 
@@ -167,6 +185,11 @@ impl PublicServer {
             let _ = old.watcher.await;
         }
 
+        // A server left running by an earlier, killed run of the app.
+        if let Some(pid_file) = self.pid_file.clone() {
+            let _ = tokio::task::spawn_blocking(move || crate::procs::reap_pid_file(&pid_file)).await;
+        }
+
         match &target {
             Target::Socket { path } => prepare_socket(path).await?,
             Target::Tcp { host, port, .. } => check_port(host, *port).await?,
@@ -183,8 +206,16 @@ impl PublicServer {
             .spawn()
             .map_err(|e| format!("Could not start fm at {fm_path}: {e}"))?;
 
+        if let (Some(pid_file), Some(pid)) = (self.pid_file.clone(), child.id()) {
+            let program = fm_path.to_string();
+            let _ = tokio::task::spawn_blocking(move || {
+                crate::procs::write_pid_file(&pid_file, pid, false, &program, "serve")
+            })
+            .await;
+        }
+
         let started_at = crate::util::now_ms();
-        *self.shared.status.lock().unwrap() = PublicServerStatus {
+        *self.shared.status.lock_safe() = PublicServerStatus {
             running: true,
             pid: child.id(),
             url: match &target {
@@ -211,7 +242,14 @@ impl PublicServer {
             Target::Tcp { port, .. } => Some(*port),
             Target::Socket { .. } => None,
         };
-        let watcher = tokio::spawn(watch(child, stop.clone(), readers, self.shared.clone(), sink.clone(), started_at, port));
+        let watcher = tokio::spawn(watch(
+            child,
+            stop.clone(),
+            readers,
+            self.shared.clone(),
+            sink.clone(),
+            Exited { started_at, port, pid_file: self.pid_file.clone() },
+        ));
         let running = Running { stop, watcher };
 
         match wait_ready(&target, &running.watcher).await {
@@ -221,10 +259,9 @@ impl PublicServer {
                 let status = self.shared.snapshot();
                 return Err(status.last_error.unwrap_or_else(|| "fm serve stopped right after it started.".into()));
             }
-            Ready::Timeout => self.shared.push_log(
-                "The server did not answer within 5 seconds. It may still be starting.".into(),
-                &sink,
-            ),
+            Ready::Timeout => self
+                .shared
+                .push_log("The server did not answer within 5 seconds. It may still be starting.".into(), &sink),
         }
         *guard = Some(running);
         drop(guard);
@@ -248,9 +285,12 @@ impl PublicServer {
     /// Sends one request to the running server and returns the whole reply.
     /// Streamed replies (server-sent events) are returned as raw text.
     pub async fn request(&self, method: &str, path: &str, body: Option<String>) -> Result<HttpResult, String> {
-        let status = self.shared.status.lock().unwrap().clone();
+        let status = self.shared.status.lock_safe().clone();
         if !status.running {
             return Err("The server is not running. Start it first.".into());
+        }
+        if path.chars().any(|c| c.is_control() || c.is_whitespace()) {
+            return Err("The path must not contain spaces or line breaks.".into());
         }
         let method = method.trim().to_uppercase();
         if method.is_empty() || !method.chars().all(|c| c.is_ascii_alphabetic()) {
@@ -384,6 +424,13 @@ where
     })
 }
 
+/// What the watcher needs after the child exits.
+struct Exited {
+    started_at: i64,
+    port: Option<u16>,
+    pid_file: Option<PathBuf>,
+}
+
 /// Owns the child until it exits (by itself or because `stop` fired).
 async fn watch(
     mut child: tokio::process::Child,
@@ -391,9 +438,9 @@ async fn watch(
     readers: Vec<JoinHandle<()>>,
     shared: Arc<Shared>,
     sink: EventSink,
-    started_at: i64,
-    port: Option<u16>,
+    info: Exited,
 ) {
+    let Exited { started_at, port, pid_file } = info;
     let mut stopped_by_user = false;
     let exit = tokio::select! {
         status = child.wait() => status.ok(),
@@ -408,6 +455,9 @@ async fn watch(
         let _ = tokio::time::timeout(Duration::from_secs(1), reader).await;
     }
     let code = exit.map(|s| super::exit_code_of(&s));
+    if let Some(pid_file) = &pid_file {
+        crate::procs::remove_pid_file(pid_file);
+    }
 
     let last_error = if stopped_by_user || code == Some(0) {
         None
@@ -415,7 +465,7 @@ async fn watch(
         Some(exit_error(&shared.lines_since(started_at), code, port))
     };
     {
-        let mut status = shared.status.lock().unwrap();
+        let mut status = shared.status.lock_safe();
         status.running = false;
         status.pid = None;
         status.last_error = last_error;
@@ -468,12 +518,9 @@ async fn wait_ready(target: &Target, watcher: &JoinHandle<()>) -> Ready {
         }
         let ok = match target {
             Target::Tcp { base_url, .. } => match &client {
-                Some(c) => c
-                    .get(format!("{base_url}/health"))
-                    .send()
-                    .await
-                    .map(|r| r.status().is_success())
-                    .unwrap_or(false),
+                Some(c) => {
+                    c.get(format!("{base_url}/health")).send().await.map(|r| r.status().is_success()).unwrap_or(false)
+                }
                 None => false,
             },
             Target::Socket { path } => path.exists() && tokio::net::UnixStream::connect(path).await.is_ok(),
@@ -489,20 +536,22 @@ async fn wait_ready(target: &Target, watcher: &JoinHandle<()>) -> Ready {
 }
 
 async fn tcp_request(base: &str, method: &str, path: &str, body: Option<String>) -> Result<(u16, String), String> {
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = reqwest::Client::builder().no_proxy().timeout(REQUEST_TIMEOUT).build().map_err(|e| e.to_string())?;
     let method = reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| e.to_string())?;
     let mut request = client.request(method, format!("{base}{path}"));
     if let Some(body) = body {
         request = request.header(reqwest::header::CONTENT_TYPE, "application/json").body(body);
     }
-    let response = request.send().await.map_err(|e| friendly_reqwest_error(&e))?;
+    let mut response = request.send().await.map_err(|e| friendly_reqwest_error(&e))?;
     let code = response.status().as_u16();
-    let text = response.text().await.map_err(|e| friendly_reqwest_error(&e))?;
-    Ok((code, text))
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| friendly_reqwest_error(&e))? {
+        if body.len() + chunk.len() > MAX_REPLY_BYTES {
+            return Err(TOO_LARGE.into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok((code, String::from_utf8_lossy(&body).into_owned()))
 }
 
 fn friendly_reqwest_error(e: &reqwest::Error) -> String {
@@ -544,6 +593,9 @@ pub(crate) async fn unix_request(
         let n = stream.read(&mut buf).await.map_err(|e| format!("Could not read the reply: {e}"))?;
         if n == 0 {
             break;
+        }
+        if raw.len() + n > MAX_REPLY_BYTES {
+            return Err(TOO_LARGE.into());
         }
         raw.extend_from_slice(&buf[..n]);
         if response_complete(&raw) {
@@ -666,7 +718,8 @@ mod tests {
         assert!(response_complete(plain));
         assert_eq!(parse_response(plain).unwrap(), (200, "hello".to_string()));
 
-        let chunked = b"HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n4\r\ndata\r\n6;x=y\r\n: more\r\n0\r\n\r\n";
+        let chunked =
+            b"HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n4\r\ndata\r\n6;x=y\r\n: more\r\n0\r\n\r\n";
         assert!(response_complete(chunked));
         assert_eq!(parse_response(chunked).unwrap(), (201, "data: more".to_string()));
 
@@ -682,7 +735,10 @@ mod tests {
 
     #[test]
     fn explains_exit_errors() {
-        let lines = vec!["Apple Foundation Models Serve".to_string(), "Error: POSIXErrorCode(rawValue: 48): Address already in use".into()];
+        let lines = vec![
+            "Apple Foundation Models Serve".to_string(),
+            "Error: POSIXErrorCode(rawValue: 48): Address already in use".into(),
+        ];
         assert!(exit_error(&lines, Some(1), Some(1976)).starts_with("Port 1976 is already in use"));
         let lines = vec!["Error: Something broke".to_string()];
         assert_eq!(exit_error(&lines, Some(1), None), "Something broke");
@@ -726,12 +782,52 @@ mod tests {
         std::fs::write(&file, "keep me").unwrap();
         let server = PublicServer::default();
         let (sink, _) = collecting_sink();
-        let err = server
-            .start_with("/usr/bin/true", &cfg("socket", "", 0, file.to_str().unwrap()), sink)
-            .await
-            .unwrap_err();
+        let err =
+            server.start_with("/usr/bin/true", &cfg("socket", "", 0, file.to_str().unwrap()), sink).await.unwrap_err();
         assert!(err.contains("is not a socket"), "{err}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "keep me");
+    }
+
+    #[tokio::test]
+    async fn pid_file_tracks_the_server_and_stops_a_leftover() {
+        use std::os::unix::process::CommandExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fm = fake_fm(dir.path(), "echo 'listening'; exec sleep 60");
+        let pid_file = dir.path().join("public-server.pid");
+        // A server left running by an earlier run that was killed.
+        let mut leftover = std::process::Command::new("/bin/sleep")
+            .arg0(format!("{fm} serve --socket {}/old.sock", dir.path().display()))
+            .arg("60")
+            .spawn()
+            .unwrap();
+        crate::procs::write_pid_file(&pid_file, leftover.id(), false, &fm, "serve").unwrap();
+
+        let server = PublicServer::with_pid_file(pid_file.clone());
+        let (sink, _) = collecting_sink();
+        let socket = dir.path().join("s.sock");
+        let status =
+            server.start_with(&fm, &cfg("socket", "", 0, socket.to_str().unwrap()), sink.clone()).await.unwrap();
+        let mut stopped = false;
+        for _ in 0..40 {
+            if leftover.try_wait().unwrap().is_some() {
+                stopped = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(stopped, "the leftover server should be stopped");
+        let record: crate::procs::PidRecord = serde_json::from_slice(&std::fs::read(&pid_file).unwrap()).unwrap();
+        assert_eq!(Some(record.pid), status.pid);
+        server.stop_with(sink).await;
+        assert!(!pid_file.exists(), "the pid file is removed when the server stops");
+    }
+
+    #[tokio::test]
+    async fn requests_with_line_breaks_are_refused() {
+        let server = PublicServer::default();
+        server.shared.status.lock_safe().running = true;
+        let err = server.request("GET", "/health HTTP/1.1\r\nX-Evil: 1", None).await.unwrap_err();
+        assert!(err.contains("must not contain"), "{err}");
     }
 
     #[tokio::test]
@@ -741,7 +837,10 @@ mod tests {
         let fm = fake_fm(dir.path(), "echo 'listening'; exec sleep 60");
         let server = PublicServer::default();
         let (sink, _) = collecting_sink();
-        let status = server.start_with(&fm, &cfg("socket", "", 0, dir.path().join("s.sock").to_str().unwrap()), sink.clone()).await.unwrap();
+        let status = server
+            .start_with(&fm, &cfg("socket", "", 0, dir.path().join("s.sock").to_str().unwrap()), sink.clone())
+            .await
+            .unwrap();
         assert!(status.running);
         let pid = status.pid.unwrap();
         let status = server.stop_with(sink).await;

@@ -1,11 +1,12 @@
 //! End-to-end tests against the real `fm serve` (private socket server).
 //! Run with: `FM_INTEGRATION=1 cargo test engine::integration_tests -- --nocapture`
 //! Optional: `FM_INTEGRATION_REPEAT=5` repeats every scenario and prints the
-//! success rate. OWNER: agent "engine".
+//! success rate.
 
 use super::{chats, router, AgentEvent, ChatMessage};
 use crate::config::{Approval, CustomTool, CustomToolKind, ParamType, ToolParam};
 use crate::state::{AppState, Paths};
+use crate::util::RwLockExt;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 
@@ -22,7 +23,7 @@ fn test_state() -> (tempfile::TempDir, Arc<AppState>) {
     let dir = tempfile::Builder::new().prefix("fmgui-").tempdir_in("/tmp").unwrap();
     let state = AppState::new(Paths::new(dir.path().to_path_buf()));
     {
-        let mut cfg = state.config.write().unwrap();
+        let mut cfg = state.config.write_safe();
         cfg.custom_tools.push(CustomTool {
             id: "order-tool".into(),
             name: "lookup_order".into(),
@@ -76,7 +77,9 @@ fn describe(o: &Outcome) -> String {
         .message
         .steps
         .iter()
-        .map(|s| format!("{}({}) → {} {:?}", s.tool_name, s.arguments, s.status, s.result.as_deref().or(s.error.as_deref())))
+        .map(|s| {
+            format!("{}({}) → {} {:?}", s.tool_name, s.arguments, s.status, s.result.as_deref().or(s.error.as_deref()))
+        })
         .collect();
     let deltas = o.events.iter().filter(|e| matches!(e, AgentEvent::Delta { .. })).count();
     format!(
@@ -293,7 +296,9 @@ async fn real_fm_approval_deny_and_stop() {
             canceller.engine.cancel_run(&chat_id);
         }
     };
-    let msg = router::run_turn(&state, None, &chat.id, "Write a long story about a cat.".into(), Vec::new(), &emit).await.unwrap();
+    let msg = router::run_turn(&state, None, &chat.id, "Write a long story about a cat.".into(), Vec::new(), &emit)
+        .await
+        .unwrap();
     assert_eq!(msg.error.as_deref(), Some("Stopped"));
     let saved = chats::load(&state.engine.chats_dir, &chat.id).unwrap();
     assert_eq!(saved.messages.len(), 2);
@@ -323,7 +328,6 @@ async fn real_fm_debug_prompt() {
     state.engine.shutdown().await;
 }
 
-
 /// An image message (data URL) gets an answer about the image.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_fm_image_message() {
@@ -336,9 +340,10 @@ async fn real_fm_image_message() {
     let (_dir, state) = test_state();
     let chat = chats::create(&state.engine.chats_dir, "").unwrap();
     let emit = |_e: AgentEvent| {};
-    let msg = router::run_turn(&state, None, &chat.id, "What color is this image? One word.".into(), vec![RED.into()], &emit)
-        .await
-        .unwrap();
+    let msg =
+        router::run_turn(&state, None, &chat.id, "What color is this image? One word.".into(), vec![RED.into()], &emit)
+            .await
+            .unwrap();
     eprintln!("image → {:?} error={:?}", msg.text, msg.error);
     state.engine.shutdown().await;
     assert!(msg.error.is_none());
@@ -356,12 +361,22 @@ async fn real_fm_context_overflow_retry() {
         return;
     }
     let (_dir, state) = test_state();
-    state.config.write().unwrap().context_size = 40_000;
+    state.config.write_safe().context_size = 40_000;
     let mut chat = chats::create(&state.engine.chats_dir, "Be brief.").unwrap();
     for i in 0..12 {
         let filler: String = (0..60).map(|n| format!("Fact {i}.{n} is about the ocean. ")).collect();
-        chat.messages.push(ChatMessage { id: format!("u{i}"), role: "user".into(), text: filler.clone(), ..Default::default() });
-        chat.messages.push(ChatMessage { id: format!("a{i}"), role: "assistant".into(), text: "Noted.".into(), ..Default::default() });
+        chat.messages.push(ChatMessage {
+            id: format!("u{i}"),
+            role: "user".into(),
+            text: filler.clone(),
+            ..Default::default()
+        });
+        chat.messages.push(ChatMessage {
+            id: format!("a{i}"),
+            role: "assistant".into(),
+            text: "Noted.".into(),
+            ..Default::default()
+        });
     }
     chats::save(&state.engine.chats_dir, &chat).unwrap();
     let statuses: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -378,4 +393,134 @@ async fn real_fm_context_overflow_retry() {
     assert!(statuses.iter().any(|s| s.contains("older messages")), "{statuses:?}");
     assert!(msg.error.is_none(), "{:?}", msg.error);
     assert!(!msg.text.trim().is_empty());
+}
+
+/// A shell tool that only echoes, for a realistic number of tools.
+fn echo_tool(name: &str, description: &str, param: &str, approval: Approval) -> CustomTool {
+    CustomTool {
+        id: format!("{name}-tool"),
+        name: name.into(),
+        description: description.into(),
+        params: vec![ToolParam {
+            name: param.into(),
+            kind: ParamType::String,
+            description: String::new(),
+            required: true,
+        }],
+        kind: CustomToolKind::Shell {
+            command: format!("echo \"ok: ${}\"", super::custom::env_name(param)),
+            cwd: None,
+            timeout_secs: 10,
+        },
+        enabled: true,
+        approval,
+    }
+}
+
+/// 11 built-in tools, 5 custom tools and one on-demand skill (`use_skill`).
+fn skill_state() -> (tempfile::TempDir, Arc<AppState>) {
+    use crate::config::{SkillMode, SkillPrefs, ToolPrefs};
+    let (dir, state) = test_state();
+    {
+        let mut cfg = state.config.write_safe();
+        for spec in super::builtin::BUILTINS {
+            cfg.builtin_tools.insert(spec.name.into(), ToolPrefs { enabled: true, approval: spec.default_approval });
+        }
+        cfg.custom_tools.push(echo_tool(
+            "get_weather",
+            "Get the weather forecast for a city.",
+            "city",
+            Approval::Always,
+        ));
+        cfg.custom_tools.push(echo_tool(
+            "convert_currency",
+            "Convert an amount of money to another currency.",
+            "amount",
+            Approval::Always,
+        ));
+        cfg.custom_tools.push(echo_tool("send_email", "Send an email to a contact.", "to", Approval::Ask));
+        cfg.custom_tools.push(echo_tool("create_note", "Save a note in the Notes app.", "text", Approval::Ask));
+        cfg.skills.insert("fruit-facts".into(), SkillPrefs { mode: SkillMode::OnDemand });
+        cfg.skills.insert("explain-like-10".into(), SkillPrefs { mode: SkillMode::OnDemand });
+    }
+    let skills = [
+        ("fruit-facts", "Use when the user asks about fruit.", "Always end your answer with the word PINEAPPLE."),
+        (
+            "explain-like-10",
+            "Use when the user asks for a simple explanation, or says \"explain like I am 10\".",
+            "Use short words a 10 year old knows. Start your answer with the word KIDDO.",
+        ),
+    ];
+    for (name, description, body) in skills {
+        let input = crate::skills::SkillInput {
+            original_name: None,
+            name: name.into(),
+            description: description.into(),
+            body: body.into(),
+        };
+        state.skills.save(&input).unwrap();
+    }
+    (dir, state)
+}
+
+/// On-demand skills: loaded for matching requests, never for unrelated ones.
+/// Prints the rates; `FM_INTEGRATION_REPEAT` repeats every prompt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn real_fm_on_demand_skill_routing() {
+    if !enabled() {
+        eprintln!("skipped: set FM_INTEGRATION=1 to run against the real fm serve");
+        return;
+    }
+    let (_dir, state) = skill_state();
+    let cfg = state.config();
+    let catalog = super::tools::catalog(&state, &cfg).await;
+    let enabled_tools = catalog.iter().filter(|t| t.info.enabled).count();
+    assert!(enabled_tools >= 16, "{enabled_tools} tools");
+
+    let keyword = ["Which fruit has the most vitamin C?", "Is a tomato a fruit?", "Name three tropical fruits."];
+    let semantic = ["Are bananas good for breakfast?", "How should I store ripe mangoes?"];
+    let unrelated =
+        ["What is the capital of France?", "What is 12 * 7?", "Write a haiku about the sea.", "What time is it?"];
+    let loaded = |o: &Outcome| o.message.skills_used.iter().any(|n| n == "fruit-facts");
+    // The skill asks for the word in capitals; "pineapple" as a fruit name does not count.
+    let pineapple = |o: &Outcome| o.message.text.contains("PINEAPPLE");
+
+    let runs = repeat();
+    let mut report = Vec::new();
+    let (mut kw_loaded, mut kw_follow, mut sem_loaded, mut sem_follow, mut wrong) = (0, 0, 0, 0, 0);
+    for _ in 0..runs {
+        for q in keyword {
+            let o = ask(&state, q).await;
+            kw_loaded += loaded(&o) as usize;
+            kw_follow += pineapple(&o) as usize;
+            report.push(format!("[keyword] {q:?} → loaded={} {}", loaded(&o), describe(&o)));
+        }
+        for q in semantic {
+            let o = ask(&state, q).await;
+            sem_loaded += loaded(&o) as usize;
+            sem_follow += pineapple(&o) as usize;
+            report.push(format!("[semantic] {q:?} → loaded={} {}", loaded(&o), describe(&o)));
+        }
+        for q in unrelated {
+            let o = ask(&state, q).await;
+            wrong += loaded(&o) as usize;
+            report.push(format!("[unrelated] {q:?} → loaded={} {}", loaded(&o), describe(&o)));
+        }
+    }
+    // The second skill: its quoted phrase loads it, and only it.
+    let o = ask(&state, "Explain like I am 10: what is a black hole?").await;
+    report.push(format!("[eli10] → {:?} {}", o.message.skills_used, describe(&o)));
+    let eli10_ok = o.message.skills_used == ["explain-like-10"];
+    state.engine.shutdown().await;
+    for line in &report {
+        eprintln!("{line}");
+    }
+    let (k, s, u) = (keyword.len() * runs, semantic.len() * runs, unrelated.len() * runs);
+    eprintln!(
+        "== skill routing: keyword loaded {kw_loaded}/{k} (followed {kw_follow}/{k}), \
+         semantic loaded {sem_loaded}/{s} (followed {sem_follow}/{s}), unrelated loaded {wrong}/{u}"
+    );
+    assert_eq!(kw_loaded, k, "matching requests must load the skill");
+    assert_eq!(wrong, 0, "unrelated requests must not load the skill");
+    assert!(eli10_ok, "the explain-like-10 skill should be the only one loaded");
 }

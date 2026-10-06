@@ -1,6 +1,9 @@
-//! The private `fm serve --socket <path>` instance owned by the engine
-//! (decisions.md D6), and a tiny HTTP/1.1 client that talks to it over the
-//! Unix socket. OWNER: agent "engine".
+//! The private `fm serve --socket <path>` instance owned by the engine, and a
+//! tiny HTTP/1.1 client that talks to it over the Unix socket.
+//!
+//! A Unix socket in the app's private data folder means no open TCP port.
+//! The webview never talks to `fm serve` directly: it answers HTTP 403 to
+//! browser requests, so all traffic goes through Rust.
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -18,6 +21,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use super::EngineStatus;
+use crate::util::LockExt;
 
 /// How long we wait for a fresh server to answer `/health`.
 const START_TIMEOUT: Duration = Duration::from_secs(15);
@@ -72,7 +76,10 @@ impl FmError {
 
     pub fn from_message(status: u16, message: String) -> Self {
         let lower = message.to_lowercase();
-        let kind = if lower.contains("context size") || lower.contains("context window") || lower.contains("exceeded the model") {
+        let kind = if lower.contains("context size")
+            || lower.contains("context window")
+            || lower.contains("exceeded the model")
+        {
             FmErrorKind::ContextOverflow
         } else if lower.contains("guardrail") {
             FmErrorKind::Guardrails
@@ -189,9 +196,7 @@ impl FmServer {
 
     async fn spawn_and_wait(&self, inner: &mut Inner, fm_path: &str) -> Result<PathBuf, String> {
         let socket = self.effective_socket();
-        if let Some(parent) = socket.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
+        prepare_socket_dir(&socket, &self.configured_socket)?;
         // A socket file left by a crash makes `fm serve` fail to bind.
         if std::fs::symlink_metadata(&socket).is_ok() {
             let _ = std::fs::remove_file(&socket);
@@ -226,7 +231,7 @@ impl FmServer {
                     if line.is_empty() {
                         continue;
                     }
-                    let mut tail = tail.lock().unwrap();
+                    let mut tail = tail.lock_safe();
                     if tail.len() >= STDERR_LINES {
                         tail.pop_front();
                     }
@@ -344,7 +349,7 @@ async fn stop_locked(inner: &mut Inner) {
 }
 
 fn tail_text(tail: &Arc<StdMutex<VecDeque<String>>>) -> String {
-    let lines: Vec<String> = tail.lock().unwrap().iter().cloned().collect();
+    let lines: Vec<String> = tail.lock_safe().iter().cloned().collect();
     let text = lines.join("\n");
     crate::util::clean_fm_error(&text)
 }
@@ -353,7 +358,8 @@ fn tail_text(tail: &Arc<StdMutex<VecDeque<String>>>) -> String {
 pub fn start_error(code: Option<i32>, stderr: &str) -> String {
     let lower = stderr.to_lowercase();
     if code == Some(69) || lower.contains("license") {
-        return "The Foundation Models license is not accepted yet. Open Setup and follow the steps, then try again.".into();
+        return "The Foundation Models license is not accepted yet. Open Setup and follow the steps, then try again."
+            .into();
     }
     let mut msg = match code {
         Some(c) => format!("fm serve stopped right away (exit code {c})."),
@@ -366,8 +372,9 @@ pub fn start_error(code: Option<i32>, stderr: &str) -> String {
     msg
 }
 
-/// Uses a short path in the per-user temp folder when `path` is too long for
-/// a Unix socket.
+/// Uses a short path when `path` is too long for a Unix socket: a private
+/// folder `fmgui-<uid>-<hash>` in the per-user temp folder (or in /tmp when
+/// even that is too long). `prepare_socket_dir` makes that folder owner-only.
 pub fn effective_socket_path(path: &Path) -> PathBuf {
     if path.as_os_str().len() <= MAX_SOCKET_PATH {
         return path.to_path_buf();
@@ -375,12 +382,39 @@ pub fn effective_socket_path(path: &Path) -> PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     path.hash(&mut hasher);
-    let short = std::env::temp_dir().join(format!("fmgui-{:016x}.sock", hasher.finish()));
-    if short.as_os_str().len() <= MAX_SOCKET_PATH {
-        short
+    // SAFETY: getuid(2) has no preconditions and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    let folder = format!("fmgui-{uid}-{:012x}", hasher.finish() & 0xffff_ffff_ffff);
+    let in_temp = std::env::temp_dir().join(&folder).join("engine.sock");
+    if in_temp.as_os_str().len() <= MAX_SOCKET_PATH {
+        in_temp
     } else {
-        PathBuf::from(format!("/tmp/fmgui-{:016x}.sock", hasher.finish()))
+        Path::new("/tmp").join(folder).join("engine.sock")
     }
+}
+
+/// Creates the socket's folder. A fallback folder (outside the app's data
+/// folder) is created owner-only, and is refused when someone else owns it
+/// or it is a symlink, so no other user can reach or replace the socket.
+fn prepare_socket_dir(socket: &Path, configured: &Path) -> Result<(), String> {
+    let Some(dir) = socket.parent() else { return Ok(()) };
+    if socket == configured {
+        let _ = std::fs::create_dir_all(dir);
+        return Ok(());
+    }
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    let _ = std::fs::DirBuilder::new().mode(0o700).create(dir);
+    let refuse =
+        || format!("The folder {} for the engine socket is not private. Remove it and try again.", dir.display());
+    let meta = std::fs::symlink_metadata(dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
+    // SAFETY: getuid(2) has no preconditions and cannot fail.
+    if !meta.is_dir() || meta.uid() != unsafe { libc::getuid() } {
+        return Err(refuse());
+    }
+    if meta.mode() & 0o077 != 0 {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(|_| refuse())?;
+    }
+    Ok(())
 }
 
 async fn health(socket: &Path) -> Result<(), FmError> {
@@ -420,9 +454,10 @@ async fn send_request(
         builder = builder.header("content-type", "application/json").header("content-length", bytes.len());
     }
     let req = builder.body(Full::new(bytes)).map_err(|err| FmError::transport(err.to_string()))?;
-    sender
-        .send_request(req)
+    // Waits for the reply head only; streamed bodies have their own idle limit.
+    tokio::time::timeout(REQUEST_TIMEOUT, sender.send_request(req))
         .await
+        .map_err(|_| FmError::transport("The engine did not answer in time."))?
         .map_err(|err| FmError::transport(format!("The engine closed the connection: {err}")))
 }
 
@@ -433,8 +468,8 @@ async fn read_json(resp: hyper::Response<Incoming>) -> Result<(u16, Value), FmEr
         .map_err(|_| FmError::transport("The engine did not answer in time."))?
         .map_err(|err| FmError::transport(format!("Could not read the engine reply: {err}")))?;
     let bytes = collected.to_bytes();
-    let value = serde_json::from_slice(&bytes)
-        .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()));
+    let value =
+        serde_json::from_slice(&bytes).unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()));
     Ok((status, value))
 }
 
@@ -471,7 +506,11 @@ impl SseStream {
                 return None;
             }
             let frame = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, self.body.frame()).await {
-                Err(_) => return Some(Err(FmError::transport("The model stopped responding for 60 seconds, so the request was stopped. Try again."))),
+                Err(_) => {
+                    return Some(Err(FmError::transport(
+                        "The model stopped responding for 60 seconds, so the request was stopped. Try again.",
+                    )))
+                }
                 Ok(None) => {
                     self.finished = true;
                     // Flush a last event without the blank line.
@@ -588,6 +627,20 @@ mod tests {
         let eff = effective_socket_path(&long);
         assert!(eff.as_os_str().len() <= MAX_SOCKET_PATH, "{}", eff.display());
         assert_eq!(eff, effective_socket_path(&long));
+        assert_eq!(eff.file_name().unwrap(), "engine.sock");
+        // The fallback folder is created owner-only.
+        prepare_socket_dir(&eff, &long).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(eff.parent().unwrap()).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        let _ = std::fs::remove_dir(eff.parent().unwrap());
+
+        // A symlink in place of the private folder is refused.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("real")).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("real"), tmp.path().join("link")).unwrap();
+        let socket = tmp.path().join("link").join("engine.sock");
+        assert!(prepare_socket_dir(&socket, &long).unwrap_err().contains("not private"));
     }
 
     #[test]

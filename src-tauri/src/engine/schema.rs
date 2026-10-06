@@ -1,5 +1,4 @@
 //! JSON Schema → the shape `fm serve` accepts for guided generation.
-//! OWNER: agent "engine".
 //!
 //! `fm` only understands schemas that look like its own (`fm schema object`):
 //! every object has `title`, `type: "object"`, `additionalProperties: false`,
@@ -15,13 +14,18 @@ use std::collections::BTreeSet;
 const MAX_REF_DEPTH: usize = 4;
 /// How deep objects may nest before we use a string.
 const MAX_NESTING: usize = 6;
+/// Guards against hostile or broken schemas from MCP servers: how deep the
+/// sanitizer may recurse (`allOf` of a `$ref` to itself, ...) and how many
+/// nodes it may visit in total (a `$ref` used many times at every level).
+const MAX_RECURSION: usize = 64;
+const MAX_NODES: usize = 2000;
 /// Long descriptions waste the small context window.
 const MAX_DESCRIPTION: usize = 300;
 
 /// Sanitizes a tool's input schema. The result is always an object schema
 /// with the given title.
 pub fn sanitize(schema: &Value, title: &str) -> Value {
-    let mut ctx = Ctx { root: schema, stack: Vec::new() };
+    let mut ctx = Ctx { root: schema, stack: Vec::new(), depth: 0, visits: 0 };
     let title = clean_title(title);
     let (node, _) = ctx.node(schema, &title, 0, 0);
     if node.get("type").and_then(Value::as_str) == Some("object") {
@@ -81,7 +85,7 @@ pub fn params_to_schema(params: &[ToolParam]) -> Value {
     })
 }
 
-/// The guided-JSON router schema (decisions.md D5): a root `anyOf` with one
+/// The guided-JSON router schema (see `router`): a root `anyOf` with one
 /// branch per tool, `{"<tool>": {args}}`, plus `{"answer": {}}` ("I can
 /// answer now"; the answer is then streamed as plain text).
 /// `tools` holds (model-facing name, sanitized args schema, description).
@@ -196,12 +200,26 @@ struct Ctx<'a> {
     root: &'a Value,
     /// `$ref`s being resolved (cycle guard).
     stack: Vec<String>,
+    /// Current recursion depth and total nodes visited (see `MAX_RECURSION`).
+    depth: usize,
+    visits: usize,
 }
 
 impl<'a> Ctx<'a> {
     /// Returns the sanitized node and whether it may be null (then the
     /// property becomes optional).
     fn node(&mut self, schema: &Value, title: &str, ref_depth: usize, nesting: usize) -> (Value, bool) {
+        self.visits += 1;
+        if self.depth >= MAX_RECURSION || self.visits > MAX_NODES {
+            return (string_schema(None), false);
+        }
+        self.depth += 1;
+        let out = self.node_inner(schema, title, ref_depth, nesting);
+        self.depth -= 1;
+        out
+    }
+
+    fn node_inner(&mut self, schema: &Value, title: &str, ref_depth: usize, nesting: usize) -> (Value, bool) {
         let obj = match schema.as_object() {
             Some(o) => o,
             None => return (string_schema(None), false),
@@ -275,7 +293,8 @@ impl<'a> Ctx<'a> {
             Some(Value::Array(types)) => {
                 let names: Vec<&str> = types.iter().filter_map(Value::as_str).collect();
                 let nullable = names.contains(&"null");
-                let first = names.iter().find(|t| **t != "null").map(|t| t.to_string()).unwrap_or_else(|| "string".into());
+                let first =
+                    names.iter().find(|t| **t != "null").map(|t| t.to_string()).unwrap_or_else(|| "string".into());
                 (first, nullable)
             }
             _ => (infer_type(obj), false),
@@ -332,11 +351,21 @@ impl<'a> Ctx<'a> {
         (node, nullable)
     }
 
-    fn object(&mut self, obj: &Map<String, Value>, title: &str, desc: Option<&str>, ref_depth: usize, nesting: usize) -> Value {
+    fn object(
+        &mut self,
+        obj: &Map<String, Value>,
+        title: &str,
+        desc: Option<&str>,
+        ref_depth: usize,
+        nesting: usize,
+    ) -> Value {
         let empty = Map::new();
         let props = obj.get("properties").and_then(Value::as_object).unwrap_or(&empty);
-        let required_in: Vec<&str> =
-            obj.get("required").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+        let required_in: Vec<&str> = obj
+            .get("required")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
         let as_value = Value::Object(obj.clone());
         let order = order_of(&as_value);
 
@@ -344,7 +373,8 @@ impl<'a> Ctx<'a> {
         let mut required = Vec::new();
         for name in &order {
             let child_title = format!("{title}_{}", clean_title(name));
-            let (child, nullable) = self.node(&props[name.as_str()], &child_title, ref_depth, nesting + 1);
+            let child_schema = props.get(name.as_str()).unwrap_or(&Value::Null);
+            let (child, nullable) = self.node(child_schema, &child_title, ref_depth, nesting + 1);
             properties.insert(name.clone(), child);
             if required_in.contains(&name.as_str()) && !nullable {
                 required.push(json!(name));
@@ -710,6 +740,27 @@ mod tests {
     }
 
     #[test]
+    fn hostile_schemas_do_not_crash_or_explode() {
+        // allOf with a $ref to itself used to recurse until the stack overflowed.
+        let s = json!({
+            "type": "object",
+            "properties": {"x": {"$ref": "#/$defs/A"}},
+            "$defs": {"A": {"allOf": [{"$ref": "#/$defs/A"}], "properties": {"y": {"allOf": [{"$ref": "#/$defs/A"}]}}}}
+        });
+        assert_fm_shape(&sanitize(&s, "t"));
+        // Wide and deep: 30 properties at every level, all the same $ref.
+        let props: Map<String, Value> = (0..30).map(|i| (format!("p{i}"), json!({"$ref": "#/$defs/N"}))).collect();
+        let mut node = json!({"type": "object", "properties": props});
+        let defs = json!({"N": node.clone()});
+        node["$defs"] = defs;
+        let started = std::time::Instant::now();
+        let out = sanitize(&node, "t");
+        assert_fm_shape(&out);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert!(out.to_string().len() < 2_000_000);
+    }
+
+    #[test]
     fn non_object_root_becomes_empty_object() {
         assert_eq!(sanitize(&json!({}), "x"), empty_object("x"));
         assert_eq!(sanitize(&json!({"type": "string"}), "x"), empty_object("x"));
@@ -722,14 +773,20 @@ mod tests {
     #[test]
     fn long_descriptions_are_cut() {
         let long = "word ".repeat(200);
-        let out = sanitize(&json!({"type": "object", "properties": {"a": {"type": "string", "description": long}}}), "t");
+        let out =
+            sanitize(&json!({"type": "object", "properties": {"a": {"type": "string", "description": long}}}), "t");
         assert!(out["properties"]["a"]["description"].as_str().unwrap().chars().count() <= MAX_DESCRIPTION);
     }
 
     #[test]
     fn params_become_schema() {
         let params = vec![
-            ToolParam { name: "order_id".into(), kind: ParamType::String, description: "Order id".into(), required: true },
+            ToolParam {
+                name: "order_id".into(),
+                kind: ParamType::String,
+                description: "Order id".into(),
+                required: true,
+            },
             ToolParam { name: "count".into(), kind: ParamType::Integer, description: String::new(), required: false },
             ToolParam { name: "".into(), kind: ParamType::Boolean, description: String::new(), required: true },
         ];
@@ -762,7 +819,10 @@ mod tests {
         assert_fm_shape(calc_def);
         assert_eq!(calc_def["required"], json!(["calculator"]));
         assert_eq!(calc_def["properties"]["calculator"]["title"], "calculator_arguments");
-        assert_eq!(schema["$defs"]["get_current_datetime"]["properties"]["get_current_datetime"]["properties"], json!({}));
+        assert_eq!(
+            schema["$defs"]["get_current_datetime"]["properties"]["get_current_datetime"]["properties"],
+            json!({})
+        );
         assert_fm_shape(&schema["$defs"]["answer"]);
     }
 
