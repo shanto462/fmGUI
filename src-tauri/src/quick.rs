@@ -7,6 +7,10 @@
 //! Losing focus (a click outside) shrinks the overlay to the pill; clicking the
 //! pill grows it back. Closing hides the window, and the UI starts an empty
 //! chat the next time it opens. The UI side lives in `src/quick/`.
+//!
+//! The menu bar icon only shows while the main window is minimized or closed.
+//! Opening Quick Chat minimizes the main window; bringing the main window back
+//! hides Quick Chat and the icon.
 
 use crate::util::LockExt;
 use serde::Serialize;
@@ -25,6 +29,8 @@ use tauri::{
 
 /// Window label of the Quick Chat window (the UI picks its root by label).
 pub const LABEL: &str = "quick";
+/// Id of the menu bar icon.
+const TRAY_ID: &str = "fmgui";
 /// Logical size of the overlay.
 const OVERLAY: (f64, f64) = (680.0, 560.0);
 /// Logical size of the pill.
@@ -148,6 +154,7 @@ pub fn set_mode(app: &AppHandle, mode: Mode) -> tauri::Result<()> {
     match mode {
         Mode::Hidden => window.hide()?,
         Mode::Overlay => {
+            minimize_main(app);
             window.set_effects(effects(22.0, false))?;
             window.set_size(LogicalSize::new(OVERLAY.0, OVERLAY.1))?;
             if let Some((x, y)) = area.map(overlay_position) {
@@ -189,33 +196,85 @@ pub fn toggle(app: &AppHandle) {
     let _ = set_mode(app, next);
 }
 
-/// Shows the main window (it is hidden, not closed, when the user closes it).
+/// Shows the main window (it is hidden, not closed, when the user closes it)
+/// and puts Quick Chat away (its chat is kept for the next open).
 pub fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     }
+    if *app.state::<QuickState>().mode.lock_safe() != Mode::Hidden {
+        let _ = set_mode(app, Mode::Hidden);
+    }
+    sync_tray(app);
 }
 
-/// The menu bar icon: left click toggles Quick Chat, the menu has the rest.
+/// Opening Quick Chat gets the main window out of the way.
+fn minimize_main(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false) {
+            let _ = window.minimize();
+        }
+    }
+}
+
+/// True while the main window is minimized or closed (hidden).
+fn main_is_away(app: &AppHandle) -> bool {
+    match app.get_webview_window("main") {
+        Some(window) => window.is_minimized().unwrap_or(false) || !window.is_visible().unwrap_or(true),
+        None => true,
+    }
+}
+
+/// Shows the menu bar icon only while the main window is away.
+pub fn sync_tray(app: &AppHandle) {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_visible(main_is_away(app));
+    }
+}
+
+/// macOS does not report minimize and restore as window events here, so a
+/// light check keeps the menu bar icon in step with the main window. When the
+/// main window comes back (Dock click, Window menu), Quick Chat is put away.
+pub fn watch_main_window(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut away = main_is_away(&app);
+        let _ = app.tray_by_id(TRAY_ID).map(|tray| tray.set_visible(away));
+        loop {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            let now = main_is_away(&app);
+            if now == away {
+                continue;
+            }
+            away = now;
+            if let Some(tray) = app.tray_by_id(TRAY_ID) {
+                let _ = tray.set_visible(away);
+            }
+            let quick_open = *app.state::<QuickState>().mode.lock_safe() != Mode::Hidden;
+            if !away && quick_open {
+                let _ = set_mode(&app, Mode::Hidden);
+            }
+        }
+    });
+}
+
+/// The menu bar icon: left click opens Quick Chat; right click shows a small
+/// menu. It starts hidden (see [`sync_tray`]).
 pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
-    let quick = MenuItem::with_id(app, "quick", "Quick Chat", true, None::<&str>)?;
     let open = MenuItem::with_id(app, "open", "Open fmGUI", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit fmGUI", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&quick, &open, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &separator, &quit])?;
 
-    TrayIconBuilder::with_id("fmgui")
+    let tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(Image::from_bytes(include_bytes!("../icons/tray.png"))?)
         .icon_as_template(true)
         .tooltip("fmGUI Quick Chat")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "quick" => {
-                let _ = set_mode(app, Mode::Overlay);
-            }
             "open" => show_main(app),
             "quit" => app.exit(0),
             _ => {}
@@ -226,6 +285,7 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
             }
         })
         .build(app)?;
+    tray.set_visible(main_is_away(app))?;
     Ok(())
 }
 
@@ -264,6 +324,7 @@ pub fn quick_hold(app: AppHandle, hold: bool) {
 /// Shows the main window, optionally on a chat (from Quick Chat "Open in fmGUI").
 #[tauri::command]
 pub fn open_main_window(app: AppHandle, chat_id: Option<String>) {
+    // show_main also puts Quick Chat away.
     show_main(&app);
     if let Some(id) = chat_id {
         let _ = app.emit_to("main", "open-chat", id);

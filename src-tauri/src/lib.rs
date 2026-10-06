@@ -87,6 +87,7 @@ pub fn run() {
             // the first open is instant.
             quick::setup_tray(app.handle())?;
             quick::ensure_window(app.handle())?;
+            quick::watch_main_window(app.handle());
 
             // Warm the login-shell environment off the main thread (used by MCP + shell tools).
             std::thread::spawn(|| {
@@ -123,6 +124,7 @@ pub fn run() {
                 if let WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = window.hide();
+                    quick::sync_tray(window.app_handle());
                 }
             }
         })

@@ -2,6 +2,7 @@
 // Pages live in src/views/<Name>View.tsx, their parts in src/views/<name>/.
 
 import {
+  MessageCircleMore,
   BookOpen,
   Boxes,
   Braces,
@@ -20,7 +21,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Button, Empty, StatusDot, Toasts } from "./components/ui";
-import { errorMessage, isTauri, onOpenChat } from "./lib/api";
+import { errorMessage, isTauri, onOpenChat, quickSetMode } from "./lib/api";
 import { cx } from "./lib/cx";
 import { isLocked, useApp, type Route } from "./lib/store";
 import ChatView from "./views/ChatView";
@@ -121,7 +122,10 @@ export default function App() {
   const load = useApp((s) => s.load);
   const status = useApp((s) => s.status);
   const loaded = useApp((s) => s.loaded);
+  const toast = useApp((s) => s.toast);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Quick Chat needs the same checks as the locked pages (Chat uses the same engine).
+  const quickLocked = loaded && isLocked("chat", status);
 
   const start = useCallback(
     () =>
@@ -203,6 +207,19 @@ export default function App() {
         </nav>
         <div className="sidebar__footer">
           <SidebarStatus />
+          {/* Opens the floating Quick Chat and minimizes this window. */}
+          <button
+            className={cx("sidebar__item", quickLocked && "sidebar__item--locked")}
+            title={quickLocked ? "Finish the setup to use Quick Chat" : "Ask from anywhere. This window minimizes."}
+            onClick={() =>
+              quickLocked
+                ? navigate("setup")
+                : quickSetMode("overlay").catch((err) => toast(errorMessage(err), "error"))
+            }
+          >
+            <MessageCircleMore size={16} />
+            <span>Quick Chat</span>
+          </button>
           <button
             className={cx("sidebar__item", route === "settings" && "sidebar__item--active")}
             onClick={() => navigate("settings")}
