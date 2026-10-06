@@ -19,9 +19,9 @@ Legend: ✅ done · 🔄 in progress · ⏳ pending · ⛔ blocked
 - 🔄 Rust: agent engine (private `fm serve` client, guided-JSON tool router, built-in tools, custom tools, approvals, chat storage).
 - ✅ Rust: MCP client (stdio + Streamable HTTP) and skills loader. 86 tests total; real `server-everything` works. Commit `b00250e`.
 - ✅ UI: setup wizard (7 steps), overview dashboard, settings. Commit `9997a0d`.
-- 🔄 UI: agent chat + CLI sessions.
+- ✅ UI: agent chat + CLI sessions. Commit `48749ce`.
 - ✅ UI: tools, MCP, skills pages with step-by-step setup wizards. Commit `3a5efaf`.
-- 🔄 UI: playground, schema builder, token counter, server page, docs viewer, settings.
+- ✅ UI: playground, schema builder, token counter, server page, docs viewer. Commit `bcd7ff9`. Builder bugs found by the agent fixed in `7d2bc4d`.
 - ✅ Docs: 13 pages in `docs/` (overview, commands, serve API, transcripts, structured output, tools, limits, Python/clients, ecosystem, license, framework, sources). Almost all facts run on this Mac.
 
 ## Extra
