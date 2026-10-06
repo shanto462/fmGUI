@@ -43,11 +43,14 @@ export function Markdown(props: { text: string; className?: string }) {
       className={`md ${props.className ?? ""}`}
       dangerouslySetInnerHTML={{ __html: html }}
       onClick={(e) => {
+        // Never let a link navigate the app window itself. Web links open in the
+        // default browser. Relative links (e.g. "06-tools.md") are handled by the
+        // page around this component (the Docs viewer listens in the capture phase).
         const a = (e.target as HTMLElement).closest("a");
-        if (a?.href && /^https?:/.test(a.href)) {
-          e.preventDefault();
-          openUrl(a.href);
-        }
+        const href = a?.getAttribute("href");
+        if (!a || !href || href.startsWith("#")) return;
+        e.preventDefault();
+        if (/^(https?|mailto):/i.test(href)) openUrl(href);
       }}
     />
   );

@@ -93,9 +93,9 @@ pub fn shell_quote(arg: &str) -> String {
     if arg.is_empty() {
         return "''".into();
     }
-    let safe = arg
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || "-_./=:,+@%".contains(c));
+    // A leading "=" is expanded by zsh (=cmd → path of cmd), so quote it.
+    let safe = !arg.starts_with('=')
+        && arg.chars().all(|c| c.is_ascii_alphanumeric() || "-_./=:,+@%".contains(c));
     if safe {
         arg.to_string()
     } else {

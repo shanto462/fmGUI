@@ -137,11 +137,9 @@ describe("respondArgs", () => {
     expect(args).toContain("receipt");
   });
 
-  // fm pairs the Nth --label with the Nth --image, not with the image right before it
-  // (checked with a saved transcript on 27.0.1). When only the 2nd image has a label,
-  // the builder emits `--image a --image b --label second`, so fm gives "second" to a.
-  // The Playground works around this by filling empty labels. Remove `.fails` once fixed.
-  it.fails("gives a label to the right image when an earlier image has none (known bug)", () => {
+  // fm pairs the Nth --label with the Nth --image (checked with a saved transcript
+  // on 27.0.1), so every image must get a label once one has a label.
+  it("gives a label to the right image when an earlier image has none", () => {
     const args = respondArgs({
       prompt: "Hi",
       tools: ["ocr"],
@@ -218,9 +216,8 @@ describe("validateSchema", () => {
     expect(validateSchema(def("Person", [prop("name"), prop("name")]))).toEqual(['"name" is used twice.']);
   });
 
-  // fm fails with "Person contains multiple name properties", but the names differ
-  // before trimming, so validateSchema misses it. Remove `.fails` once fixed.
-  it.fails("rejects duplicate names that differ only by spaces (known bug)", () => {
+  // fm fails with "Person contains multiple name properties".
+  it("rejects duplicate names that differ only by spaces", () => {
     expect(validateSchema(def("Person", [prop("name"), prop("name ")]))).toHaveLength(1);
   });
 });
@@ -303,5 +300,23 @@ describe("shellQuote and displayCommand", () => {
     expect(displayCommand(["respond", "--", "Hi there"])).toBe("fm respond -- 'Hi there'");
     expect(displayCommand(["available"], "/opt/fm")).toBe("/opt/fm available");
     expect(displayCommand(["available"], "/My Tools/fm")).toBe("'/My Tools/fm' available");
+  });
+});
+
+describe("fixes for issues found by the UI agents", () => {
+  it("rejects a property that is both a value and an object", () => {
+    const d = {
+      rootName: "Place",
+      properties: [
+        { id: "1", name: "address", type: "string" as const, isArray: false, isOptional: false, description: "" },
+        { id: "2", name: "address.street", type: "string" as const, isArray: false, isOptional: false, description: "" },
+      ],
+    };
+    expect(validateSchema(d).some((p) => p.includes("as a value and as an object"))).toBe(true);
+  });
+
+  it("quotes a leading = so zsh does not expand it", () => {
+    expect(shellQuote("=ls")).toBe("'=ls'");
+    expect(shellQuote("a=b")).toBe("a=b");
   });
 });

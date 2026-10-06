@@ -51,11 +51,15 @@ export function respondArgs(o: RespondOptions): string[] {
   if (o.instructions?.trim()) args.push("-i", o.instructions);
   if (o.schema?.trim()) args.push("--schema", o.schema);
   for (const t of o.textSegments ?? []) if (t.trim()) args.push("--text", t);
-  const useLabels = (o.tools ?? []).length > 0;
-  for (const img of o.images ?? []) {
+  // fm pairs the Nth --label with the Nth --image (not with the image just
+  // before it). So once any image has a label, every image gets one, with
+  // fm's own default name (image_<index>) for the empty ones.
+  const images = o.images ?? [];
+  const useLabels = (o.tools ?? []).length > 0 && images.some((i) => i.label?.trim());
+  images.forEach((img, i) => {
     args.push("--image", img.path);
-    if (useLabels && img.label?.trim()) args.push("--label", img.label.trim());
-  }
+    if (useLabels) args.push("--label", img.label?.trim() || `image_${i}`);
+  });
   for (const tool of o.tools ?? []) args.push("--tool", tool);
   if (o.resumePath) args.push("--resume", o.resumePath);
   if (o.saveTranscriptPath) args.push("--save-transcript", o.saveTranscriptPath);
@@ -112,11 +116,18 @@ export function validateSchema(def: SchemaDefinition): string[] {
     problems.push("Type name must be one word, like Person.");
   }
   if (def.properties.length === 0) problems.push("Add at least one property.");
+  const names = def.properties.map((p) => p.name.trim());
   const seen = new Set<string>();
-  for (const p of def.properties) {
-    if (!NAME_RE.test(p.name.trim())) problems.push(`"${p.name || "(empty)"}" is not a valid property name.`);
-    if (seen.has(p.name)) problems.push(`"${p.name}" is used twice.`);
-    seen.add(p.name);
+  for (const name of names) {
+    if (!NAME_RE.test(name)) problems.push(`"${name || "(empty)"}" is not a valid property name.`);
+    else if (seen.has(name)) problems.push(`"${name}" is used twice.`);
+    seen.add(name);
+  }
+  // "address" cannot be both a value and the parent of "address.street".
+  for (const name of seen) {
+    if (names.some((other) => other.startsWith(`${name}.`))) {
+      problems.push(`"${name}" is used as a value and as an object (${name}.…). Rename one of them.`);
+    }
   }
   return problems;
 }
@@ -152,7 +163,8 @@ const SAFE = /^[A-Za-z0-9\-_./=:,+@%]+$/;
 /** POSIX shell quoting, same rules as the Rust `display_command`. */
 export function shellQuote(arg: string): string {
   if (arg === "") return "''";
-  if (SAFE.test(arg)) return arg;
+  // A leading "=" is expanded by zsh (=cmd → path of cmd), so quote it.
+  if (SAFE.test(arg) && !arg.startsWith("=")) return arg;
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
