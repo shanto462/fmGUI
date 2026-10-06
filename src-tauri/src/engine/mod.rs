@@ -3,15 +3,25 @@
 //! agent chat storage.
 //! OWNER: agent "engine". Items marked CONTRACT keep their signatures.
 
+pub mod builtin;
 pub mod chats;
 pub mod commands;
+pub mod custom;
 pub mod fm_client;
+pub mod process;
 pub mod router;
 pub mod schema;
 pub mod tools;
 
+#[cfg(test)]
+mod integration_tests;
+
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 /// CONTRACT: one tool call inside an assistant turn.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -155,15 +165,77 @@ pub struct EngineStatus {
 pub struct Engine {
     pub socket_path: PathBuf,
     pub chats_dir: PathBuf,
-    // Agent "engine": add fields (server child, approvals map, active runs, ...).
+    /// The private `fm serve --socket` child and its HTTP client.
+    pub(crate) server: fm_client::FmServer,
+    /// Pending approvals: approval id → sender of the decision.
+    approvals: Mutex<HashMap<String, oneshot::Sender<String>>>,
+    /// Running turns: chat id → cancel token.
+    active: Mutex<HashMap<String, CancellationToken>>,
 }
 
 impl Engine {
     /// CONTRACT
     pub fn new(socket_path: PathBuf, chats_dir: PathBuf) -> Self {
-        Self { socket_path, chats_dir }
+        Self {
+            server: fm_client::FmServer::new(socket_path.clone()),
+            socket_path,
+            chats_dir,
+            approvals: Mutex::new(HashMap::new()),
+            active: Mutex::new(HashMap::new()),
+        }
     }
 
     /// CONTRACT: stop the private server. Called on app exit.
-    pub async fn shutdown(&self) {}
+    pub async fn shutdown(&self) {
+        let tokens: Vec<CancellationToken> = self.active.lock().unwrap().drain().map(|(_, t)| t).collect();
+        for token in tokens {
+            token.cancel();
+        }
+        self.approvals.lock().unwrap().clear();
+        self.server.stop().await;
+    }
+
+    /// Marks a chat as answering. Only one turn per chat at a time.
+    pub(crate) fn begin_run(&self, chat_id: &str) -> Result<CancellationToken, String> {
+        let mut active = self.active.lock().unwrap();
+        if active.contains_key(chat_id) {
+            return Err("This chat is still answering. Wait for it, or press Stop.".into());
+        }
+        let token = CancellationToken::new();
+        active.insert(chat_id.to_string(), token.clone());
+        Ok(token)
+    }
+
+    pub(crate) fn end_run(&self, chat_id: &str) {
+        self.active.lock().unwrap().remove(chat_id);
+    }
+
+    /// Stops a running turn. Returns false when the chat was not answering.
+    pub fn cancel_run(&self, chat_id: &str) -> bool {
+        match self.active.lock().unwrap().get(chat_id) {
+            Some(token) => {
+                token.cancel();
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub(crate) fn register_approval(&self, approval_id: &str) -> oneshot::Receiver<String> {
+        let (tx, rx) = oneshot::channel();
+        self.approvals.lock().unwrap().insert(approval_id.to_string(), tx);
+        rx
+    }
+
+    pub(crate) fn drop_approval(&self, approval_id: &str) {
+        self.approvals.lock().unwrap().remove(approval_id);
+    }
+
+    /// Delivers the user's decision. False when nothing waits for it.
+    pub fn respond_approval(&self, approval_id: &str, decision: &str) -> bool {
+        match self.approvals.lock().unwrap().remove(approval_id) {
+            Some(tx) => tx.send(decision.to_string()).is_ok(),
+            None => false,
+        }
+    }
 }
