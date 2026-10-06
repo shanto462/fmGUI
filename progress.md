@@ -17,12 +17,15 @@ Legend: ✅ done · 🔄 in progress · ⏳ pending · ⛔ blocked
 ## Build (delegated to agents)
 - ✅ Rust: `fm` CLI layer (runner, status, CLI sessions, respond/count/schema commands, public server manager). 41 tests, 9 against real fm. Commit `c765b1b`. Public server autostart wired in `1a3d178`.
 - 🔄 Rust: agent engine (private `fm serve` client, guided-JSON tool router, built-in tools, custom tools, approvals, chat storage).
-- 🔄 Rust: MCP client (stdio + Streamable HTTP) and skills loader.
+- ✅ Rust: MCP client (stdio + Streamable HTTP) and skills loader. 86 tests total; real `server-everything` works. Commit `b00250e`.
 - ✅ UI: setup wizard (7 steps), overview dashboard, settings. Commit `9997a0d`.
 - 🔄 UI: agent chat + CLI sessions.
-- 🔄 UI: tools, MCP, skills pages with step-by-step setup wizards.
+- ✅ UI: tools, MCP, skills pages with step-by-step setup wizards. Commit `3a5efaf`.
 - 🔄 UI: playground, schema builder, token counter, server page, docs viewer, settings.
 - ✅ Docs: 13 pages in `docs/` (overview, commands, serve API, transcripts, structured output, tools, limits, Python/clients, ecosystem, license, framework, sources). Almost all facts run on this Mac.
+
+## Extra
+- ✅ Browser mock mode (`?mock=1`, dev only) for UI previews. Commit `c047a8f`.
 
 ## Verify
 - ⏳ `cargo build`, `cargo test`, `npm run build` (TypeScript check).
@@ -30,7 +33,7 @@ Legend: ✅ done · 🔄 in progress · ⏳ pending · ⛔ blocked
 - ⏳ Build the `.app` bundle and launch it.
 
 ## Polish backlog (from agent reports)
-- ⏳ `Steps` component: add `onSelect(index)` prop (Setup uses a click workaround now).
+- ✅ `Steps` onSelect, `Modal` dismissible, color fallbacks, parallel MCP connect, prune on save. Commit `aa45f68`.
 - ⏳ Allow `x-apple.systempreferences:` in the opener scope so Setup can open the Apple Intelligence pane directly.
 
 ## Notes
