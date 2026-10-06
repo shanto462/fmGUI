@@ -1,0 +1,153 @@
+name: Release
+
+# Builds the macOS app and publishes a GitHub Release after CI passes on the
+# master branch (main only runs CI: build and tests). The version is automatic (scripts/next-version.mjs): every
+# release raises the patch number of the newest tag (v0.1.0, v0.1.1, ...).
+# For a new minor or major version, run `npm run version:set X.Y.Z` and push.
+#
+# Pushes that only change docs (Markdown, docs/, issue templates) do not make
+# a release. Run the workflow by hand (Actions > Release > Run workflow) to
+# release anyway.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    # Only after a successful CI run for a push (not for pull requests).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: macos-latest
+    env:
+      CARGO_TERM_COLOR: always
+      # The app needs macOS 27 (Info.plist LSMinimumSystemVersion from
+      # tauri.conf.json). Runners have an older SDK, so compile for an older
+      # target; Cargo's [env] never overrides a variable that is already set.
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0 # tags are needed for the version
+
+      - name: Decide whether to release
+        id: decide
+        run: |
+          latest=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ -z "$latest" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$latest" HEAD -- . ':(exclude)*.md' ':(exclude)docs' ':(exclude).github/ISSUE_TEMPLATE'; then
+            echo "Only docs changed since $latest: no release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          elif git tag --points-at HEAD | grep -q '^v'; then
+            echo "This commit is already released."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.decide.outputs.release == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.decide.outputs.release == 'true'
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.decide.outputs.release == 'true'
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        if: steps.decide.outputs.release == 'true'
+        run: npm ci
+
+      - name: Set the version
+        id: version
+        if: steps.decide.outputs.release == 'true'
+        run: |
+          version=$(node scripts/next-version.mjs)
+          scripts/set-version.sh "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # Optional signing and notarization. Add these repository secrets to turn
+      # it on: APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
+      # APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM_ID.
+      # Without them the app is ad-hoc signed (tauri.conf.json signingIdentity "-").
+      - name: Signing secrets (optional)
+        if: steps.decide.outputs.release == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            value="${!name}"
+            if [ -n "$value" ]; then
+              {
+                echo "$name<<__END__"
+                echo "$value"
+                echo "__END__"
+              } >> "$GITHUB_ENV"
+            fi
+          done
+
+      - name: Build fmGUI.app and the DMG
+        if: steps.decide.outputs.release == 'true'
+        run: npx tauri build --bundles app,dmg
+
+      - name: Package
+        id: package
+        if: steps.decide.outputs.release == 'true'
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          bundle=src-tauri/target/release/bundle
+          dmg="fmGUI_${version}_aarch64.dmg"
+          cp "$(ls "$bundle"/dmg/*.dmg | head -n1)" "$dmg"
+          zip="fmGUI_${version}_aarch64.app.zip"
+          ditto -c -k --keepParent "$bundle/macos/fmGUI.app" "$zip"
+          shasum -a 256 "$dmg" "$zip" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          {
+            echo "dmg=$dmg"
+            echo "zip=$zip"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish the GitHub Release
+        if: steps.decide.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          cat > notes.md <<'EOF'
+          **Requirements:** macOS 27 or later on Apple silicon, Apple Intelligence on, and the `fm` license accepted once (`sudo fm license`).
+
+          **Install:** open the DMG and drag fmGUI to Applications. If the build is not notarized, macOS blocks the first start: right-click fmGUI and choose Open, or run `xattr -dr com.apple.quarantine /Applications/fmGUI.app`.
+          EOF
+          gh release create "v$version" \
+            "${{ steps.package.outputs.dmg }}" \
+            "${{ steps.package.outputs.zip }}" \
+            SHA256SUMS.txt \
+            --target "$SHA" \
+            --title "fmGUI $version" \
+            --notes-file notes.md \
+            --generate-notes

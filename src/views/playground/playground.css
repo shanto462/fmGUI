@@ -1,0 +1,92 @@
+/* Playground styles. Class prefix: pg-. */
+
+.pg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.pg-add-images {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  cursor: default;
+}
+
+.pg-add-images:hover {
+  border-color: var(--accent);
+  background: var(--accent-softer);
+}
+
+.pg-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--text-xs);
+}
+
+.pg-transcript__meta {
+  color: var(--label-2);
+  font-weight: 600;
+}
+
+.pg-transcript__msg {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pg-transcript__msg > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pg-transcript__role {
+  flex-shrink: 0;
+  width: 72px;
+  color: var(--label-3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding-top: 1px;
+}
+
+.pg-transcript__more {
+  color: var(--label-3);
+  padding-left: 80px;
+}
+
+.pg-json {
+  margin: 0;
+  padding: 16px 20px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: auto;
+}
+
+.pg-history-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 9px 6px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--label-2);
+}
+
+.pg-on {
+  background: var(--pressed);
+  color: var(--label);
+}

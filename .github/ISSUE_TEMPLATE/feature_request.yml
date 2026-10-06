@@ -1,0 +1,61 @@
+name: Feature request
+description: An idea for something new in fmGUI, or a way to make it better.
+title: "[Idea]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the idea. Please search the open issues first, in case someone asked for it already.
+
+        Keep in mind: fmGUI uses Apple's `fm` tool and the small on-device model (about 8,192 tokens of context). Some ideas need features that `fm` does not have yet.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What do you want to do, and what makes it hard today?
+      placeholder: "I want to ... but ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Your idea
+      description: How could fmGUI solve it? Describe what you would see and click.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Other ways you tried
+      description: Workarounds or other apps you use for this today.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      multiple: true
+      options:
+        - Setup Guide
+        - Overview
+        - Chat
+        - Tools (built-in or custom)
+        - MCP servers
+        - Skills
+        - CLI Sessions
+        - Playground
+        - Schema Builder
+        - Token Counter
+        - API Server
+        - Docs
+        - Settings
+        - Something new
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Links, screenshots or examples.

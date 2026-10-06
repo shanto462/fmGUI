@@ -1,0 +1,62 @@
+[package]
+name = "fmgui"
+version = "0.1.0"
+description = "A macOS 27 desktop app for Apple's fm CLI (on-device Foundation Models): chat with tools, MCP servers and skills"
+authors = ["Shanto"]
+license = "MIT"
+repository = "https://github.com/shanto462/fmGUI"
+readme = "../README.md"
+keywords = ["tauri", "macos", "foundation-models", "llm", "mcp"]
+categories = ["gui"]
+edition = "2021"
+# The oldest Rust the dependency tree supports (Tauri 2.12 needs 1.90).
+rust-version = "1.90"
+publish = false
+
+[lib]
+# Library + thin binary (tests use the library). macOS only, so no
+# staticlib/cdylib for mobile targets.
+name = "fmgui_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1.53.2", features = ["full"] }
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
+http-body-util = "0.1.5"
+bytes = "1.12.1"
+futures-util = "0.3.34"
+regex = "1.13.1"
+base64 = "0.23.1"
+dirs = "7.0.0"
+evalexpr = "13.1.0"
+tokio-util = "0.7.19"
+uuid = { version = "1.27.0", features = ["v4"] }
+chrono = "0.4.45"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+libc = "0.2"
+
+[features]
+# Release builds with the Web Inspector (for debugging only):
+# npx tauri build --features diagnostics, then run with FMGUI_DEVTOOLS=1.
+diagnostics = ["tauri/devtools"]
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+# See https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

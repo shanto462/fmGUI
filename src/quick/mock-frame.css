@@ -1,0 +1,87 @@
+/* Mock mode only: a fake desktop and a fake glass window for Quick Chat.
+   The real window gets its glass from macOS. */
+
+.qm-desktop {
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 30%, #ff9f6e 0, transparent 40%),
+    radial-gradient(circle at 80% 20%, #6ea8ff 0, transparent 45%),
+    radial-gradient(circle at 60% 85%, #b58cff 0, transparent 45%), #3a4a6b;
+}
+
+.qm-menubar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 30px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.35);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  color: rgba(0, 0, 0, 0.8);
+  font-size: 12px;
+}
+
+.qm-menubar__name {
+  font-weight: 600;
+}
+
+.qm-menubar__hint,
+.qm-menubar__mode {
+  opacity: 0.7;
+}
+
+.qm-menubar__icon {
+  height: 22px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+}
+
+.qm-window {
+  position: absolute;
+  overflow: clip;
+  background: rgba(246, 246, 250, 0.55);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
+  backdrop-filter: blur(30px) saturate(1.8);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.3),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.6);
+}
+
+@media (prefers-color-scheme: dark) {
+  .qm-window {
+    background: rgba(40, 40, 46, 0.55);
+    box-shadow:
+      0 24px 60px rgba(0, 0, 0, 0.5),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.15);
+  }
+}
+
+.qm-window--overlay,
+.qm-window--hidden {
+  top: clamp(36px, 14vh, calc(100vh - 580px));
+  left: calc(50% - 340px);
+  width: 680px;
+  height: 560px;
+  border-radius: 22px;
+}
+
+.qm-window--hidden {
+  visibility: hidden;
+}
+
+.qm-window--pip {
+  right: 20px;
+  bottom: 20px;
+  width: 320px;
+  height: 64px;
+  border-radius: 32px;
+}
