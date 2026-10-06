@@ -31,20 +31,35 @@ pub async fn chat_get(state: State<'_, AppState>, id: String) -> Result<Chat, St
 
 /// `instructions: None` → use config.chatDefaults.instructions.
 #[tauri::command]
-pub async fn chat_create(state: State<'_, AppState>, instructions: Option<String>) -> Result<Chat, String> {
+pub async fn chat_create(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    instructions: Option<String>,
+) -> Result<Chat, String> {
     let instructions = instructions.unwrap_or_else(|| state.config().chat_defaults.instructions);
-    chats::create(&state.engine.chats_dir, &instructions)
+    let chat = chats::create(&state.engine.chats_dir, &instructions)?;
+    router::notify_chats_changed(Some(&app), &chat.id);
+    Ok(chat)
 }
 
 #[tauri::command]
-pub async fn chat_delete(state: State<'_, AppState>, id: String) -> Result<(), String> {
+pub async fn chat_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
     state.engine.cancel_run(&id);
-    chats::delete(&state.engine.chats_dir, &id)
+    chats::delete(&state.engine.chats_dir, &id)?;
+    router::notify_chats_changed(Some(&app), &id);
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn chat_rename(state: State<'_, AppState>, id: String, title: String) -> Result<Chat, String> {
-    chats::rename(&state.engine.chats_dir, &id, &title)
+pub async fn chat_rename(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    title: String,
+) -> Result<Chat, String> {
+    let chat = chats::rename(&state.engine.chats_dir, &id, &title)?;
+    router::notify_chats_changed(Some(&app), &id);
+    Ok(chat)
 }
 
 #[tauri::command]

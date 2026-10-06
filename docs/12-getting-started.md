@@ -57,6 +57,11 @@ not in fmGUI. The agreement is for the whole Mac, so you only do it once.
 If a check fails later (for example after a macOS update asks you to accept new terms), the open page sends you back to
 the Setup Guide.
 
+## Tip: Quick Chat in the menu bar
+
+fmGUI adds a conversation icon to the menu bar. Click it to ask something from anywhere, in a small window that stays
+on top. Closing the main window keeps fmGUI running there. See [Quick Chat](16-quick-chat.md).
+
 ## Step 3: Your first chat
 
 1. Open **Chat** in the sidebar. Click the new chat button (or press ⌘N).

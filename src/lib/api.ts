@@ -152,3 +152,7 @@ export const onQuickReset = (cb: () => void): Promise<UnlistenFn> => listen("qui
 /** Main window: Quick Chat asked to open this chat id. */
 export const onOpenChat = (cb: (chatId: string) => void): Promise<UnlistenFn> =>
   listen<string>("open-chat", (e) => cb(e.payload));
+
+/** A chat was created, saved, renamed or deleted (by any window). Payload: chat id. */
+export const onChatsChanged = (cb: (chatId: string) => void): Promise<UnlistenFn> =>
+  listen<string>("chats-changed", (e) => cb(e.payload));

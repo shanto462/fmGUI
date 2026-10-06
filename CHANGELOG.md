@@ -22,6 +22,12 @@ The first public release.
 - A **guided-JSON tool router**, because `fm serve` on macOS 27.0.1 never returns `tool_calls`. It asks the model for
   one choice per tool at temperature 0, runs the tool, and streams the final answer as plain text.
 - **Approvals** for tools: Allow once, Always allow, or Deny.
+- **Quick Chat** in the menu bar: a frameless, always-on-top Liquid Glass overlay that shrinks to a
+  picture-in-picture pill when you click outside, grows back on click, and starts empty after you close it. Quick
+  chats are saved in the Chat list, and **Open in fmGUI** continues them in the main window.
+- Closing the main window keeps fmGUI running in the menu bar; the Dock icon brings it back.
+- **Single instance** and **clean processes**: a second launch focuses the running app; every `fm serve` and MCP
+  server is stopped on quit (also on SIGTERM), and leftovers from a crash are stopped at the next launch.
 - **11 built-in tools**: `get_current_datetime`, `calculator`, `fetch_url`, `spotlight_search`, `read_file`,
   `list_directory`, `write_file`, `run_shell_command`, `read_clipboard`, `open_url`, `run_shortcut`. File tools only
   work in the folders you allow.

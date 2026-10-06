@@ -12,6 +12,7 @@ Checked on macOS 27.0.1 (build 26A434), Apple M4 Pro, on 2026-10-06. Anything no
 | [13 Custom tools](13-custom-tools.md) | Shell, HTTP and Shortcut tools step by step: `FM_ARG_` variables, `{{param}}` placeholders, approvals, good descriptions, three examples. |
 | [14 MCP servers](14-mcp-servers.md) | Add MCP servers with the wizard: templates, stdio vs Streamable HTTP, `npx` and `uvx`, per-tool switches and context cost, troubleshooting. |
 | [15 Skills](15-skills.md) | The `SKILL.md` format, the three modes, how `use_skill` works, importing from `~/.claude/skills`, two example skills. |
+| [16 Quick Chat](16-quick-chat.md) | The menu bar icon, the always-on-top overlay and the picture-in-picture pill, approvals, starting over. |
 
 ## fm pages
 

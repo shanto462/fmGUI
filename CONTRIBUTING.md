@@ -65,12 +65,15 @@ src/                         React + TypeScript UI
   components/                shared UI parts (ui.tsx) and safe Markdown (Markdown.tsx)
   styles/                    design tokens and shared CSS classes
   views/<Name>View.tsx       one file per page; its parts live in views/<name>/
+  quick/                     Quick Chat window (overlay and pill), reuses views/chat/
 src-tauri/                   Rust backend (Tauri 2)
   src/lib.rs                 app setup, command registration, clean shutdown
   src/state.rs               AppState and Paths (the data folder layout)
   src/config.rs              AppConfig, saved as config.json
   src/util.rs                shared helpers: ANSI stripping, login shell env, token estimate
   src/app_commands.rs        config, paths and file commands
+  src/quick.rs               menu bar icon and the Quick Chat window (overlay, pill, hide on close)
+  src/procs.rs               stops leftover child processes from an earlier run (pid files, data dir match)
   src/fm/                    runs the fm CLI: status, respond, count-tokens, schema,
                              CLI sessions, transcripts, the public fm serve (API Server page)
   src/engine/                chat engine: private fm serve over a Unix socket (fm_client.rs),
@@ -85,7 +88,7 @@ scripts/                     verify.sh and release.sh
 How a request flows: a page calls a wrapper in `src/lib/api.ts`, which calls `invoke()`. Tauri runs the matching
 `#[tauri::command]` in Rust. Rust runs `/usr/bin/fm` or talks to the private `fm serve` over its Unix socket. Long
 work streams back over a Tauri `Channel` (`fm_run`, `chat_send`) or an event (`mcp-status`, `config-changed`,
-`public-server-log`). The webview never talks to `fm serve` itself.
+`public-server-log`, `chats-changed`, and for Quick Chat `quick-mode`, `quick-reset`, `open-chat`). The webview never talks to `fm serve` itself.
 
 ### Add a page
 

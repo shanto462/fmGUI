@@ -12,6 +12,7 @@ import {
   chatRename,
   chatSetInstructions,
   chatsList,
+  onChatsChanged,
   errorMessage,
   toolsCatalog,
 } from "../lib/api";
@@ -124,6 +125,12 @@ export default function ChatView() {
     });
     void loadCatalog();
   }, [loadList, loadCatalog]);
+
+  // Chats saved elsewhere (Quick Chat, another turn) refresh the list.
+  useEffect(() => {
+    const unlisten = onChatsChanged(() => void loadList());
+    return () => void unlisten.then((stop) => stop());
+  }, [loadList]);
 
   // Load the selected chat once; live chats stay in local state. A failed load
   // shows its error until the next try (the error is keyed by chat id).

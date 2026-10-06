@@ -622,6 +622,13 @@ impl Drop for RunGuard<'_> {
 /// One agent turn: saves the user message, runs the model with tools,
 /// streams events, saves the assistant message (also on errors) and
 /// returns it. Errors during the turn end up in `message.error`.
+/// Tells every window (main Chat list, Quick Chat) that a chat was saved.
+pub fn notify_chats_changed(app: Option<&AppHandle>, chat_id: &str) {
+    if let Some(app) = app {
+        let _ = app.emit("chats-changed", chat_id);
+    }
+}
+
 pub async fn run_turn(
     state: &AppState,
     app: Option<&AppHandle>,
@@ -649,6 +656,7 @@ pub async fn run_turn(
     chat.messages.push(user.clone());
     chat.updated_at = now_ms();
     chats::save(dir, &chat)?;
+    notify_chats_changed(app, chat_id);
     emit(AgentEvent::UserMessage { message: user });
 
     let message_id = new_id();
@@ -688,6 +696,7 @@ pub async fn run_turn(
         if let Err(err) = chats::save(dir, &latest) {
             emit(AgentEvent::Error { message: err });
         }
+        notify_chats_changed(app, chat_id);
     }
     let used_tokens = if turn.max_total > 0 { turn.max_total } else { usage.total_tokens };
     emit(AgentEvent::Context { used_tokens, context_size: cfg.context_size });

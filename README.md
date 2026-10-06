@@ -18,6 +18,9 @@ It is built with [Tauri 2](https://tauri.app) (a Rust backend and a React + Type
 - **Skills**: `SKILL.md` instructions that are always on or loaded on demand. Import the skills you already have in
   `~/.claude/skills`.
 - **Approvals**: tools that can change things ask first (Allow once, Always allow, Deny).
+- **Quick Chat** from the menu bar: a Spotlight-like overlay that floats on top (Liquid Glass). Click outside and it
+  shrinks to a small picture-in-picture pill; click the pill to grow it again. Closing the main window keeps fmGUI and
+  Quick Chat running.
 - **CLI Sessions**: browse, rename and continue the chats that `fm chat` saves in `~/.fm/sessions`.
 - **Playground** for every `fm respond` option, a **Schema Builder** for `fm schema object`, and a **Token Counter**
   for `fm count-tokens`.
@@ -121,6 +124,10 @@ The release build ends up in `src-tauri/target/release/bundle/` (`macos/fmGUI.ap
 - **The context budget.** The model sees 8,192 tokens (some Macs report 4,096; change it in Settings). Every enabled
   tool and skill costs tokens in every request. fmGUI keeps the prompt to about 5,100 tokens, leaves out the oldest
   messages first, and cuts long tool results.
+- **Quick Chat.** A second, frameless window with the same engine. Rust switches it between the overlay and the pill
+  when it loses focus, and the UI reuses the Chat page components.
+- **Clean processes.** Only one copy of fmGUI runs at a time. Every `fm serve` and MCP server it starts is stopped on
+  quit, and leftovers from a crash are stopped at the next launch.
 - **MCP and skills.** Enabled MCP servers start when the app starts, with your login shell PATH. On-demand skills are
   loaded by a `use_skill` tool only when the model needs them.
 
@@ -134,6 +141,7 @@ The release build ends up in `src-tauri/target/release/bundle/` (`macos/fmGUI.ap
 | Apple Shortcut | any shortcut from the Shortcuts app | [Custom tools](docs/13-custom-tools.md) |
 | MCP server | Filesystem, Fetch, Memory, Time, Git, Sequential thinking, Everything, or your own | [MCP servers](docs/14-mcp-servers.md) |
 | Skill | a `SKILL.md` with instructions for one kind of task | [Skills](docs/15-skills.md) |
+| Quick Chat | The menu bar overlay and pill | [Quick Chat](docs/16-quick-chat.md) |
 
 Built-in tools:
 
