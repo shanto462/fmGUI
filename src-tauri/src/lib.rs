@@ -10,6 +10,7 @@ pub mod engine;
 pub mod fm;
 pub mod mcp;
 pub mod procs;
+pub mod quick;
 pub mod skills;
 pub mod state;
 pub mod util;
@@ -19,7 +20,7 @@ compile_error!("fmGUI only supports macOS 27 or later: it drives Apple's /usr/bi
 
 use state::{AppState, Paths};
 use std::time::Duration;
-use tauri::{AppHandle, Manager, RunEvent};
+use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 
 /// Stops every child process the app owns: the private engine server, the
 /// public server and the MCP servers. Safe to call more than once.
@@ -57,11 +58,7 @@ fn exit_on_signals(handle: AppHandle) {
 
 /// A second launch of the app shows the running window instead.
 fn focus_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+    quick::show_main(app);
 }
 
 pub fn run() {
@@ -83,7 +80,13 @@ pub fn run() {
             }
 
             app.manage(AppState::new(paths));
+            app.manage(quick::QuickState::default());
             exit_on_signals(app.handle().clone());
+
+            // Menu bar icon + Quick Chat. The window is created hidden now so
+            // the first open is instant.
+            quick::setup_tray(app.handle())?;
+            quick::ensure_window(app.handle())?;
 
             // Warm the login-shell environment off the main thread (used by MCP + shell tools).
             std::thread::spawn(|| {
@@ -113,6 +116,16 @@ pub fn run() {
             });
             Ok(())
         })
+        // Closing the main window hides it: the menu bar icon and Quick Chat
+        // keep working. Quit with Cmd+Q or the menu bar menu.
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             // app
             app_commands::get_config,
@@ -124,6 +137,12 @@ pub fn run() {
             app_commands::save_temp_text,
             app_commands::read_image_data_url,
             app_commands::which_command,
+            // Quick Chat (menu bar)
+            quick::quick_set_mode,
+            quick::quick_mode,
+            quick::quick_close,
+            quick::quick_hold,
+            quick::open_main_window,
             // fm CLI
             fm::commands::fm_run,
             fm::commands::fm_cancel,
@@ -178,9 +197,10 @@ pub fn run() {
         }
     };
 
-    app.run(|handle, event| {
-        if let RunEvent::Exit = event {
-            tauri::async_runtime::block_on(stop_children(handle));
-        }
+    app.run(|handle, event| match event {
+        // Dock icon clicked: bring back the (hidden) main window.
+        RunEvent::Reopen { .. } => quick::show_main(handle),
+        RunEvent::Exit => tauri::async_runtime::block_on(stop_children(handle)),
+        _ => {}
     });
 }
