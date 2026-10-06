@@ -32,6 +32,11 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let state = handle.state::<AppState>();
                 let cfg = state.config();
+                if cfg.public_server.autostart {
+                    if let Err(err) = state.public_server.start(&handle, &cfg.fm_path, &cfg.public_server).await {
+                        eprintln!("public server: autostart failed: {err}");
+                    }
+                }
                 for server in cfg.mcp_servers.iter().filter(|s| s.enabled) {
                     if let Err(err) = state.mcp.connect(&handle, server).await {
                         eprintln!("mcp: {} failed to connect: {err}", server.name);
