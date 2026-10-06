@@ -15,10 +15,10 @@ Legend: ✅ done · 🔄 in progress · ⏳ pending · ⛔ blocked
 - ✅ Tauri 2 project skeleton + shared contract (Rust command stubs, TS types, API wrapper, fm arg builders, store, design system, app shell). Builds: `cargo build`, `tsc`, `vite build`. In commit `init`.
 
 ## Build (delegated to agents)
-- 🔄 Rust: `fm` CLI layer (runner, status, CLI sessions, respond/count/schema commands, public server manager).
+- ✅ Rust: `fm` CLI layer (runner, status, CLI sessions, respond/count/schema commands, public server manager). 41 tests, 9 against real fm. Commit `c765b1b`. Public server autostart wired in `1a3d178`.
 - 🔄 Rust: agent engine (private `fm serve` client, guided-JSON tool router, built-in tools, custom tools, approvals, chat storage).
 - 🔄 Rust: MCP client (stdio + Streamable HTTP) and skills loader.
-- 🔄 UI: setup wizard, overview, settings (app shell + sidebar done by lead).
+- ✅ UI: setup wizard (7 steps), overview dashboard, settings. Commit `9997a0d`.
 - 🔄 UI: agent chat + CLI sessions.
 - 🔄 UI: tools, MCP, skills pages with step-by-step setup wizards.
 - 🔄 UI: playground, schema builder, token counter, server page, docs viewer, settings.
@@ -28,6 +28,10 @@ Legend: ✅ done · 🔄 in progress · ⏳ pending · ⛔ blocked
 - ⏳ `cargo build`, `cargo test`, `npm run build` (TypeScript check).
 - ⏳ Real end-to-end: chat with a custom tool, an MCP server, and a skill against the real `fm`.
 - ⏳ Build the `.app` bundle and launch it.
+
+## Polish backlog (from agent reports)
+- ⏳ `Steps` component: add `onSelect(index)` prop (Setup uses a click workaround now).
+- ⏳ Allow `x-apple.systempreferences:` in the opener scope so Setup can open the Apple Intelligence pane directly.
 
 ## Notes
 - Test leftover to clean: `~/.fm/sessions/hello-friend.json` was created by Claude while testing `fm chat`.
