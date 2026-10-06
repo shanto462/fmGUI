@@ -19,7 +19,9 @@
     "format": "prettier --write . && cd src-tauri && cargo fmt",
     "format:check": "prettier --check . && cd src-tauri && cargo fmt --check",
     "verify": "scripts/verify.sh",
-    "preview:mock": "vite --open /?mock=1"
+    "preview:mock": "vite --open /?mock=1",
+    "version:set": "scripts/set-version.sh",
+    "version:next": "node scripts/next-version.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

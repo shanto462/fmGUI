@@ -5,13 +5,15 @@ window. It lives in the menu bar and floats above your other windows.
 
 ## Open it
 
-- Click the **conversation icon** in the menu bar (two speech bubbles). Quick Chat opens near the top of the screen,
-  like Spotlight, and the message box is ready for typing.
-- Or right-click the icon and choose **Quick Chat**.
+- In the main window, click **Quick Chat** at the bottom of the sidebar. The main window minimizes and Quick Chat
+  opens near the top of the screen, like Spotlight, with the message box ready for typing.
+- While the main window is minimized or closed, a small **chat bubble icon** shows in the menu bar. Click it to open
+  Quick Chat. Right-click it for **Open fmGUI** and **Quit fmGUI**.
 
-The menu bar icon stays while fmGUI runs. Closing the main window does **not** quit fmGUI: the window hides and Quick
-Chat keeps working. Click the fmGUI icon in the Dock (or **Open fmGUI** in the menu bar menu) to bring the main window
-back. To quit, choose **Quit fmGUI** in the menu bar menu or press ⌘Q.
+The menu bar icon only shows while the main window is away, so it never clutters the menu bar while you use the app.
+Closing the main window does **not** quit fmGUI: the window hides and Quick Chat keeps working. Click the fmGUI icon in
+the Dock (or **Open fmGUI** in the menu bar menu) to bring the main window back; Quick Chat and the menu bar icon then
+step aside. To quit, choose **Quit fmGUI** in the menu bar menu or press ⌘Q.
 
 ## The two sizes
 

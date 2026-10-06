@@ -59,7 +59,8 @@
     "category": "DeveloperTool",
     "shortDescription": "A desktop app for Apple's fm CLI",
     "macOS": {
-      "minimumSystemVersion": "27.0"
+      "minimumSystemVersion": "27.0",
+      "signingIdentity": "-"
     },
     "icon": [
       "icons/32x32.png",

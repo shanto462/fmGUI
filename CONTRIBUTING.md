@@ -164,3 +164,14 @@ It runs the same checks as CI. Add `FM_INTEGRATION=1` when you changed the engin
 - Update the docs in `docs/` when you change how something works.
 
 By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE).
+
+## Releasing
+
+- `main` is for day-to-day work: every push and pull request runs CI (`.github/workflows/ci.yml`).
+- `master` publishes: after CI passes on a push to `master`, `.github/workflows/release.yml` builds `fmGUI.app` and
+  the DMG on macOS and creates a GitHub Release with generated notes. Docs-only pushes do not release. You can also
+  run the Release workflow by hand from the Actions tab.
+- The version is computed by `scripts/next-version.mjs` (patch + 1 from the newest `v*` tag, or the `package.json`
+  version when it is newer). For a minor or major release, run `npm run version:set X.Y.Z` and commit the change.
+- To debug a release build, build it with the Web Inspector: `npx tauri build --features diagnostics`, then start it
+  with `FMGUI_DEVTOOLS=1 src-tauri/target/release/bundle/macos/fmGUI.app/Contents/MacOS/fmgui`.

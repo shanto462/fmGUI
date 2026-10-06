@@ -18,9 +18,9 @@ It is built with [Tauri 2](https://tauri.app) (a Rust backend and a React + Type
 - **Skills**: `SKILL.md` instructions that are always on or loaded on demand. Import the skills you already have in
   `~/.claude/skills`.
 - **Approvals**: tools that can change things ask first (Allow once, Always allow, Deny).
-- **Quick Chat** from the menu bar: a Spotlight-like overlay that floats on top (Liquid Glass). Click outside and it
-  shrinks to a small picture-in-picture pill; click the pill to grow it again. Closing the main window keeps fmGUI and
-  Quick Chat running.
+- **Quick Chat**: a Spotlight-like overlay that floats on top (Liquid Glass). Open it from the sidebar (the main window
+  minimizes) or from the menu bar icon, which only shows while the main window is minimized or closed. Click outside
+  and it shrinks to a small picture-in-picture pill; click the pill to grow it again.
 - **CLI Sessions**: browse, rename and continue the chats that `fm chat` saves in `~/.fm/sessions`.
 - **Playground** for every `fm respond` option, a **Schema Builder** for `fm schema object`, and a **Token Counter**
   for `fm count-tokens`.
@@ -106,6 +106,8 @@ The release build ends up in `src-tauri/target/release/bundle/` (`macos/fmGUI.ap
 | `npm run format:check` | Checks the formatting without changing files. |
 | `npm run verify` | Runs every CI check in one go (`scripts/verify.sh`). Add `FM_INTEGRATION=1` to also test against the real `fm`. |
 | `npm run preview:mock` | Opens the UI in your browser with fake data (`/?mock=1`). No Rust and no `fm` needed. |
+| `npm run version:set X.Y.Z` | Sets the version in `package.json`, `tauri.conf.json` and `Cargo.toml` (for a new minor or major release). |
+| `npm run version:next` | Prints the version the next release will get. |
 
 ## How it works
 
@@ -130,6 +132,17 @@ The release build ends up in `src-tauri/target/release/bundle/` (`macos/fmGUI.ap
   quit, and leftovers from a crash are stopped at the next launch.
 - **MCP and skills.** Enabled MCP servers start when the app starts, with your login shell PATH. On-demand skills are
   loaded by a `use_skill` tool only when the model needs them.
+
+## Releases
+
+Every push to `master` that passes CI and changes more than docs builds the app on a GitHub macOS runner and publishes
+a [GitHub Release](https://github.com/shanto462/fmGUI/releases) with the `.dmg`, a zipped `.app` and SHA-256
+checksums. Pushes to `main` (and pull requests) only run CI: type checks, lint, format, tests and builds.
+
+Versions are automatic: each release raises the patch number of the newest tag (v0.1.0, v0.1.1, v0.1.2, ...). For a
+new minor or major version, run `npm run version:set 0.2.0`, commit, and push to `master`; releases then continue from
+0.2.0. `npm run version:next` prints the version the next release will get. The builds are ad-hoc signed; add the
+Apple signing secrets listed in `.github/workflows/release.yml` to sign and notarize them.
 
 ## Tools, MCP servers and skills
 
