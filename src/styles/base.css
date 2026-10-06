@@ -1207,3 +1207,13 @@ a:hover {
   border-color: var(--accent);
   background: var(--accent-softer);
 }
+
+/* Small windows: give the detail pane more room. */
+@media (max-width: 1100px) {
+  .split__list {
+    width: 236px;
+  }
+  .page__body {
+    padding: var(--space-5);
+  }
+}
