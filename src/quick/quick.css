@@ -1,0 +1,536 @@
+/* Quick Chat window. macOS draws the Liquid Glass background (quick.rs), so
+   html, body, #root and .qa stay transparent. Inner surfaces use light
+   translucent fills only. Every class starts with "qa-"; overrides of the
+   shared chat parts are scoped to .qa. */
+
+.qa {
+  --qa-fill: rgba(255, 255, 255, 0.4);
+  --qa-fill-2: rgba(255, 255, 255, 0.6);
+  --qa-fill-3: rgba(255, 255, 255, 0.78);
+  --qa-stroke: rgba(0, 0, 0, 0.07);
+  --qa-hover: rgba(0, 0, 0, 0.05);
+  --qa-code: rgba(0, 0, 0, 0.045);
+
+  position: relative;
+  width: 100%;
+  height: 100%;
+  /* clip, not hidden: a hidden box can still be scrolled (by focus), which
+     would move the pill out of the pill-sized window. */
+  overflow: clip;
+  /* The layout follows the real window size: Rust resizes the window first and
+     sends the mode after, so this never shows a squeezed overlay. */
+  container: qa / size;
+}
+
+@media (prefers-color-scheme: dark) {
+  .qa {
+    --qa-fill: rgba(255, 255, 255, 0.06);
+    --qa-fill-2: rgba(255, 255, 255, 0.1);
+    --qa-fill-3: rgba(255, 255, 255, 0.16);
+    --qa-stroke: rgba(255, 255, 255, 0.09);
+    --qa-hover: rgba(255, 255, 255, 0.07);
+    --qa-code: rgba(0, 0, 0, 0.22);
+  }
+}
+
+/* ---------- Layers: overlay and pill ---------- */
+.qa-layer {
+  position: absolute;
+  inset: 0;
+  transition:
+    opacity 0.22s var(--ease),
+    transform 0.22s var(--ease);
+}
+
+/* Pill-sized window: hide the overlay at once (no fade out) and keep its
+   layout at full size, so the scroll position survives. */
+@container qa (height < 160px) {
+  .qa-overlay {
+    inset: auto;
+    top: 0;
+    left: 0;
+    width: 680px;
+    height: 560px;
+    visibility: hidden;
+    opacity: 0;
+    transform: scale(0.985);
+    transition: none;
+  }
+}
+
+@container qa (height >= 160px) {
+  .qa-pill {
+    visibility: hidden;
+    opacity: 0;
+    transition: none;
+  }
+}
+
+/* ---------- Glyph ---------- */
+.qa-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 45%, var(--purple)));
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.28),
+    0 2px 8px color-mix(in srgb, var(--accent) 28%, transparent);
+  transition: background 0.2s var(--ease);
+}
+
+.qa-glyph svg {
+  pointer-events: none;
+}
+
+.qa-glyph--sm {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+}
+
+.qa-glyph--lg {
+  width: 38px;
+  height: 38px;
+}
+
+.qa-spin {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ---------- Overlay ---------- */
+.qa-overlay {
+  display: flex;
+  flex-direction: column;
+}
+
+.qa-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 10px 0 14px;
+  border-bottom: 0.5px solid var(--qa-stroke);
+}
+
+.qa-head__glyph {
+  display: inline-flex;
+}
+
+/* Clicks on the glyph reach its drag region. */
+.qa-head__glyph > * {
+  pointer-events: none;
+}
+
+.qa-head__name {
+  flex-shrink: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.qa-head__sep {
+  flex-shrink: 0;
+  color: var(--label-3);
+  pointer-events: none;
+}
+
+.qa-head__title {
+  min-width: 0;
+  flex-shrink: 1;
+  font-size: var(--text-md);
+  color: var(--label-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qa-head .spacer {
+  min-width: 8px;
+}
+
+.qa-head__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.qa .icon-btn:hover {
+  background: var(--qa-hover);
+}
+
+.qa-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.qa-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.qa-thread {
+  padding: 16px 22px 12px;
+}
+
+.qa-thread--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+}
+
+.qa-tobottom {
+  bottom: 8px;
+}
+
+.qa-dock {
+  flex-shrink: 0;
+  padding: 2px 14px 14px;
+}
+
+/* ---------- Empty chat ---------- */
+.qa-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0 20px;
+  text-align: center;
+  animation: qa-rise 0.3s var(--ease);
+}
+
+.qa-empty .qa-glyph {
+  width: 44px;
+  height: 44px;
+  margin-bottom: 10px;
+}
+
+.qa-empty__title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.qa-empty__text {
+  margin-bottom: 16px;
+  font-size: var(--text-sm);
+  color: var(--label-2);
+}
+
+.qa-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 560px;
+}
+
+.qa-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 30px;
+  padding: 0 13px;
+  border: 0.5px solid var(--qa-stroke);
+  border-radius: var(--radius-pill);
+  background: var(--qa-fill);
+  font-size: var(--text-sm);
+  cursor: default;
+  transition:
+    background 0.15s var(--ease),
+    transform 0.1s var(--ease);
+}
+
+.qa-chip svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.qa-chip:hover {
+  background: var(--qa-fill-2);
+}
+
+.qa-chip:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.qa-chip:disabled {
+  opacity: 0.5;
+}
+
+/* ---------- Setup and loading ---------- */
+.qa-gate {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 56px 48px;
+  text-align: center;
+  color: var(--label-2);
+}
+
+.qa-gate > svg {
+  margin-bottom: 4px;
+  color: var(--label-3);
+}
+
+.qa-gate__title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--label);
+}
+
+.qa-gate__text {
+  max-width: 420px;
+  margin-bottom: 8px;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+/* ---------- Pill ---------- */
+.qa-pill {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 8px 0 13px;
+  border-radius: 32px;
+  cursor: default;
+  outline: none;
+}
+
+.qa-pill:focus-visible {
+  box-shadow: inset var(--focus-ring);
+}
+
+.qa-pill__text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+
+.qa-pill__text--muted {
+  font-weight: 400;
+  color: var(--label-2);
+}
+
+.qa-pill__text--busy {
+  color: var(--label-2);
+  animation: qa-breathe 1.6s ease-in-out infinite;
+}
+
+.qa-pill__text--warn {
+  color: var(--orange);
+}
+
+.qa-pill__text--error {
+  color: var(--red);
+}
+
+.qa-pill:has(.qa-pill__text--warn) .qa-glyph {
+  background: linear-gradient(135deg, var(--orange), color-mix(in srgb, var(--orange) 60%, var(--red)));
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.28),
+    0 2px 8px color-mix(in srgb, var(--orange) 30%, transparent);
+}
+
+.qa-pill__grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 40px;
+  border-radius: 8px;
+  color: var(--label-3);
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+
+.qa-pill__grip:hover {
+  color: var(--label-2);
+  background: var(--qa-hover);
+}
+
+/* Clicks on the icon reach the drag region. */
+.qa-pill__grip svg {
+  pointer-events: none;
+}
+
+/* ---------- Shared chat parts on glass ---------- */
+.qa .cv-thread__messages {
+  gap: 16px;
+}
+
+.qa .cv-bubble {
+  max-width: 82%;
+  padding: 7px 13px;
+  border-radius: 16px 16px 5px 16px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  font-size: 13.5px;
+}
+
+.qa .cv-answer {
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.qa .cv-step {
+  border-color: var(--qa-stroke);
+  background: var(--qa-fill);
+}
+
+.qa .cv-step__head:hover {
+  background: var(--qa-hover);
+}
+
+.qa .cv-step__body {
+  border-top-color: var(--qa-stroke);
+}
+
+.qa .cv-step--approval {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-softer);
+}
+
+.qa .cv-step--danger {
+  border-color: color-mix(in srgb, var(--orange) 55%, transparent);
+  background: color-mix(in srgb, var(--orange) 10%, transparent);
+}
+
+.qa .code,
+.qa .md pre,
+.qa .md code,
+.qa .kbd {
+  border-color: var(--qa-stroke);
+  background: var(--qa-code);
+}
+
+.qa .md pre code {
+  background: none;
+}
+
+.qa .md th {
+  background: var(--qa-fill);
+}
+
+.qa .cv-thumb,
+.qa .cv-attachment img,
+.qa .cv-attachment__placeholder {
+  background: var(--qa-fill);
+}
+
+.qa .btn:not(.btn--primary, .btn--danger, .btn--plain) {
+  background: var(--qa-fill-2);
+  box-shadow: 0 0 0 0.5px var(--qa-stroke);
+}
+
+.qa .btn:not(.btn--primary, .btn--danger, .btn--plain):hover {
+  background: var(--qa-fill-3);
+}
+
+.qa .cv-composer-wrap {
+  max-width: none;
+}
+
+.qa .cv-composer {
+  padding: 8px 8px 6px 14px;
+  border: 0.5px solid var(--qa-stroke);
+  border-radius: 18px;
+  background: var(--qa-fill-2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.qa .cv-composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+
+/* A whole-pixel line height: a fractional one makes the field overflow by a
+   fraction and show a scrollbar. */
+.qa .cv-composer__input {
+  max-height: 140px;
+  font-size: 13.5px;
+  line-height: 20px;
+}
+
+.qa .cv-send:not(.cv-send--ready, .cv-send--stop) {
+  background: var(--qa-fill-3);
+}
+
+/* The "Enter to send" line: the placeholder says enough in a small window. */
+.qa .cv-composer-foot {
+  display: none;
+}
+
+.qa .cv-drop {
+  inset: 8px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.qa .toasts {
+  top: 54px;
+  right: 14px;
+  bottom: auto;
+}
+
+@media (prefers-color-scheme: dark) {
+  .qa .cv-bubble {
+    background: color-mix(in srgb, var(--accent) 34%, transparent);
+  }
+
+  .qa .cv-composer {
+    box-shadow: none;
+  }
+}
+
+@keyframes qa-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes qa-breathe {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qa-layer {
+    transition: none;
+  }
+
+  .qa-empty,
+  .qa-pill__text--busy {
+    animation: none;
+  }
+}

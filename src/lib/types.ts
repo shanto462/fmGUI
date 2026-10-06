@@ -322,3 +322,7 @@ export interface SkillCandidate {
   tokenEstimate: number;
   alreadyImported: boolean;
 }
+
+// ---------- quick.rs ----------
+/** Where the Quick Chat window is: hidden, the big overlay, or the small pill (picture in picture). */
+export type QuickMode = "hidden" | "overlay" | "pip";

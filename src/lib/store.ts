@@ -45,6 +45,8 @@ export interface Handoff {
 interface AppStore {
   route: Route;
   handoff: Handoff;
+  /** Quick Chat → the open Chat page: open this chat. A new object for every request. */
+  chatRequest: { id: string } | null;
   config: AppConfig | null;
   status: FmStatus | null;
   paths: PathsInfo | null;
@@ -56,6 +58,8 @@ interface AppStore {
   navigate: (route: Route, handoff?: Handoff) => void;
   /** Returns the hand-off and clears it. For an effect that acts on it once; pages that only need it for their first render use `useHandoff`. */
   takeHandoff: () => Handoff;
+  /** Opens a chat on the Chat page (Quick Chat "Open in fmGUI"). Works when the Chat page is open already. */
+  openChat: (id: string) => void;
   /** Loads config, paths and the fm status. Throws when the config or paths cannot be read. */
   load: () => Promise<void>;
   refreshStatus: () => Promise<FmStatus | null>;
@@ -108,6 +112,7 @@ async function loadApp() {
 export const useApp = create<AppStore>((set, get) => ({
   route: "overview",
   handoff: {},
+  chatRequest: null,
   config: null,
   status: null,
   paths: null,
@@ -129,6 +134,12 @@ export const useApp = create<AppStore>((set, get) => ({
     const h = get().handoff;
     set({ handoff: {} });
     return h;
+  },
+
+  // The Chat page reads a hand-off only when it opens, so an open Chat page gets a request instead.
+  openChat: (id) => {
+    if (get().route === "chat") set({ chatRequest: { id } });
+    else get().navigate("chat", { chatId: id });
   },
 
   // Calls made while a load runs share it (React runs start-up effects twice in development).

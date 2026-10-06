@@ -5,34 +5,30 @@ import { ArrowDown, ImagePlus } from "lucide-react";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Button, Callout, Modal, Spinner } from "../components/ui";
 import {
-  approvalRespond,
   chatCancel,
   chatCreate,
   chatDelete,
   chatGet,
   chatRename,
-  chatSend,
   chatSetInstructions,
   chatsList,
   errorMessage,
-  getConfig,
-  newId,
-  readImageDataUrl,
   toolsCatalog,
 } from "../lib/api";
 import { pluralize } from "../lib/format";
-import { baseName } from "../lib/paths";
 import { useApp, useHandoff } from "../lib/store";
-import type { AgentEvent, ApprovalDecision, Chat, ChatMessage, ChatSummary, ToolInfo } from "../lib/types";
+import type { ApprovalDecision, Chat, ChatMessage, ChatSummary, ToolInfo } from "../lib/types";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ChatList } from "./chat/ChatList";
 import { chatReducer, initialChatState, type ContextUse } from "./chat/chatState";
-import { Composer, type ComposerAttachment } from "./chat/Composer";
+import { Composer } from "./chat/Composer";
 import { useAutoScroll, useElementHeight, useImageFileDrop } from "./chat/hooks";
-import { AssistantMessage, MessageError, StatusLine, UserMessage } from "./chat/Messages";
+import { MessageList } from "./chat/MessageList";
 import { ToolsModal } from "./chat/ToolsModal";
+import { answerApproval, lastUserInput, runTurn, takeLiveRetry } from "./chat/turn";
+import { useAttachments } from "./chat/useAttachments";
 import { useModelReady } from "./chat/useModelReady";
-import { blankMessage, imageFiles, isTempId, pickImagePaths, readFileAsDataUrl } from "./chat/utils";
+import { imageFiles } from "./chat/utils";
 import { Welcome } from "./chat/Welcome";
 import "./chat/chat.css";
 
@@ -72,7 +68,7 @@ export default function ChatView() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [stopping, setStopping] = useState<Record<string, boolean>>({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const { attachments, images: readyImages, addImagePaths, addFiles, pickImages, remove, clear } = useAttachments();
 
   // The latest state and chat id for async callbacks (send, new chat, delete).
   const stateRef = useRef(state);
@@ -145,6 +141,25 @@ export default function ChatView() {
   useEffect(() => {
     textareaRef.current?.focus();
   }, [activeId]);
+
+  // Quick Chat "Open in fmGUI" while this page is open. The quick window may have
+  // changed that chat, so drop a copy loaded earlier (unless it runs here) and reload.
+  const openRequested = useEffectEvent((id: string) => {
+    if (!stateRef.current.runs[id]?.running) dispatch({ type: "removeChat", id });
+    setLoadError(null);
+    setActiveId(id);
+    setReloadTick((t) => t + 1);
+    void loadList();
+  });
+  useEffect(
+    () =>
+      useApp.subscribe((s, prev) => {
+        if (!s.chatRequest || s.chatRequest === prev.chatRequest) return;
+        useApp.setState({ chatRequest: null });
+        openRequested(s.chatRequest.id);
+      }),
+    [],
+  );
 
   // ---------- chats ----------
   const createChat = useCallback(async (): Promise<string | null> => {
@@ -248,15 +263,7 @@ export default function ChatView() {
       }
       if (!fresh && stateRef.current.runs[chatId]?.running) return;
       const id = chatId;
-      dispatch({ type: "startRun", chatId: id, text, images, tempUser: blankMessage("user", { text, images }) });
-      scrollToBottom();
-      const onEvent = (event: AgentEvent) => dispatch({ type: "event", chatId: id, event });
-      try {
-        const final = await chatSend(id, text, images, onEvent);
-        dispatch(final?.id ? { type: "finishRun", chatId: id, message: final } : { type: "finishRun", chatId: id });
-      } catch (err) {
-        dispatch({ type: "finishRun", chatId: id, error: errorMessage(err) });
-      }
+      await runTurn(dispatch, id, { text, images }, scrollToBottom);
       setStopping((s) => ({ ...s, [id]: false }));
       // The engine may have given the chat a title.
       const chats = await loadList();
@@ -268,23 +275,22 @@ export default function ChatView() {
 
   function submit() {
     const text = (drafts[activeId ?? NEW_KEY] ?? "").trim();
-    const images = attachments.filter((a) => a.src).map((a) => a.src!);
+    const images = readyImages;
     if (!text && images.length === 0) return;
     setDrafts((d) => ({ ...d, [activeId ?? NEW_KEY]: "" }));
-    setAttachments([]);
+    clear();
     send(text, images);
   }
 
   function retryLive() {
     if (!activeId || !run) return;
-    if (run.tempUserId) dispatch({ type: "removeMessage", chatId: activeId, messageId: run.tempUserId });
-    dispatch({ type: "clearError", chatId: activeId });
-    send(run.lastText, run.lastImages);
+    const input = takeLiveRetry(dispatch, activeId, run);
+    send(input.text, input.images);
   }
 
   function retrySaved() {
-    const lastUser = [...messages].reverse().find((m) => m.role === "user");
-    if (lastUser) send(lastUser.text, lastUser.images);
+    const input = lastUserInput(messages);
+    if (input) send(input.text, input.images);
   }
 
   async function stop() {
@@ -301,65 +307,14 @@ export default function ChatView() {
 
   const respond = useCallback(
     async (approvalId: string, decision: ApprovalDecision) => {
-      try {
-        await approvalRespond(approvalId, decision);
-        if (decision === "always") {
-          // The engine saved approval=always in the config; keep the store in sync
-          // so a later config save does not undo it. (The config-changed event
-          // does this too, so a failed read here is harmless.)
-          getConfig()
-            .then((fresh) => useApp.setState({ config: fresh }))
-            .catch(() => undefined);
-          void loadCatalog();
-        }
-        return true;
-      } catch (err) {
-        toast(`Could not send your answer. ${errorMessage(err)}`, "error");
-        return false;
-      }
+      const ok = await answerApproval(approvalId, decision);
+      if (ok && decision === "always") void loadCatalog();
+      return ok;
     },
-    [loadCatalog, toast],
+    [loadCatalog],
   );
 
   // ---------- attachments ----------
-  const addImagePaths = useCallback(
-    (paths: string[]) => {
-      const items = paths.map((p) => ({ id: newId(), src: null, name: baseName(p), loading: true }));
-      setAttachments((a) => [...a, ...items]);
-      items.forEach((item, i) => {
-        readImageDataUrl(paths[i])
-          .then((src) => setAttachments((a) => a.map((x) => (x.id === item.id ? { ...x, src, loading: false } : x))))
-          .catch((err) => {
-            setAttachments((a) => a.filter((x) => x.id !== item.id));
-            toast(`Could not read ${item.name}. ${errorMessage(err)}`, "error");
-          });
-      });
-    },
-    [toast],
-  );
-
-  function addFiles(files: File[]) {
-    const items = files.map((f) => ({ id: newId(), src: null, name: f.name || "Pasted image", loading: true }));
-    setAttachments((a) => [...a, ...items]);
-    items.forEach((item, i) => {
-      readFileAsDataUrl(files[i])
-        .then((src) => setAttachments((a) => a.map((x) => (x.id === item.id ? { ...x, src, loading: false } : x))))
-        .catch((err) => {
-          setAttachments((a) => a.filter((x) => x.id !== item.id));
-          toast(`Could not read ${item.name}. ${errorMessage(err)}`, "error");
-        });
-    });
-  }
-
-  async function pickImages() {
-    try {
-      const paths = await pickImagePaths();
-      if (paths.length) addImagePaths(paths);
-    } catch (err) {
-      toast(`Could not open the file picker. ${errorMessage(err)}`, "error");
-    }
-  }
-
   const dropOver = useImageFileDrop(addImagePaths);
 
   // ---------- derived ----------
@@ -392,7 +347,6 @@ export default function ChatView() {
     return lastAssistant?.usage && size ? { used: lastAssistant.usage.totalTokens, size } : null;
   }, [activeId, state.context, messages, config?.contextSize, fmContextSize]);
 
-  const lastMessage = messages[messages.length - 1];
   const showWelcome = (list !== null && !activeId) || (!!chat && messages.length === 0 && !running);
   const draft = drafts[activeId ?? NEW_KEY] ?? "";
 
@@ -466,34 +420,15 @@ export default function ChatView() {
               {showWelcome && (
                 <Welcome onPick={(text) => send(text, [])} disabled={!ready.ready || creating} toolsOff={toolsOff} />
               )}
-              {(messages.length > 0 || running) && (
-                <div className="cv-thread__messages" key={activeId ?? NEW_KEY}>
-                  {messages.map((m, i) =>
-                    m.role === "user" ? (
-                      <UserMessage key={i} text={m.text} images={m.images} pending={running && isTempId(m.id)} />
-                    ) : (
-                      <AssistantMessage
-                        key={i}
-                        message={m}
-                        streaming={running && m.id === run?.liveId}
-                        status={m.id === run?.liveId ? (run?.status ?? null) : null}
-                        approvals={m.id === run?.liveId ? run?.approvals : undefined}
-                        dangerousTools={dangerousTools}
-                        onRespond={respond}
-                        onRetry={!running && m === lastMessage && m.error ? retrySaved : undefined}
-                      />
-                    ),
-                  )}
-                  {running && !run?.liveId && (
-                    <div className="cv-msg cv-msg--assistant">
-                      <StatusLine text={run?.status || "Thinking…"} />
-                    </div>
-                  )}
-                </div>
-              )}
-              {!running && run?.error && (
-                <MessageError text={run.error} onRetry={ready.ready ? retryLive : undefined} />
-              )}
+              <MessageList
+                messages={messages}
+                run={run}
+                dangerousTools={dangerousTools}
+                onRespond={respond}
+                onRetrySaved={retrySaved}
+                onRetryLive={ready.ready ? retryLive : undefined}
+                listKey={activeId ?? NEW_KEY}
+              />
             </div>
           </div>
 
@@ -522,7 +457,7 @@ export default function ChatView() {
               ready={ready}
               blockedReason={loading ? "This chat is still loading." : creating ? "Starting a new chat…" : null}
               attachments={attachments}
-              onRemoveAttachment={(id) => setAttachments((a) => a.filter((x) => x.id !== id))}
+              onRemoveAttachment={remove}
               onAttach={pickImages}
               onPasteFiles={addFiles}
               placeholder={chat && messages.length > 0 ? "Reply" : "Ask anything"}

@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Button, Empty, StatusDot, Toasts } from "./components/ui";
-import { errorMessage, isTauri } from "./lib/api";
+import { errorMessage, isTauri, onOpenChat } from "./lib/api";
 import { cx } from "./lib/cx";
 import { isLocked, useApp, type Route } from "./lib/store";
 import ChatView from "./views/ChatView";
@@ -134,6 +134,23 @@ export default function App() {
   useEffect(() => {
     if (isTauri()) void start();
   }, [start]);
+
+  // Quick Chat "Open in fmGUI": show that chat on the Chat page.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    onOpenChat((chatId) => useApp.getState().openChat(chatId))
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   // Safety net: every call shows its own error, but if one slips through, the
   // user still sees it instead of a silent failure.

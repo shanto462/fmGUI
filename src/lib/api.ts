@@ -24,6 +24,7 @@ import type {
   PathsInfo,
   PublicServerConfig,
   PublicServerStatus,
+  QuickMode,
   RunEvent,
   RunResult,
   Skill,
@@ -134,3 +135,20 @@ export const skillTokenCount = (name: string) => invoke<number>("skill_token_cou
 
 /** Absolute path of a program on the login-shell PATH, or null. */
 export const whichCommand = (name: string) => invoke<string | null>("which_command", { name });
+
+// ---------- Quick Chat (quick.rs) ----------
+/** Moves the Quick Chat window: "overlay" (big, focused), "pip" (the pill) or "hidden". */
+export const quickSetMode = (mode: QuickMode) => invoke<void>("quick_set_mode", { mode });
+export const quickMode = () => invoke<QuickMode>("quick_mode");
+/** Hides Quick Chat. Rust then sends "quick-reset", so the next open starts empty. */
+export const quickClose = () => invoke<void>("quick_close");
+/** While true, losing the focus (to a file panel) does not shrink the overlay to the pill. */
+export const quickHold = (hold: boolean) => invoke<void>("quick_hold", { hold });
+/** Shows the main window. With a chat id it also opens that chat there ("open-chat"). */
+export const openMainWindow = (chatId: string | null) => invoke<void>("open_main_window", { chatId });
+export const onQuickMode = (cb: (mode: QuickMode) => void): Promise<UnlistenFn> =>
+  listen<QuickMode>("quick-mode", (e) => cb(e.payload));
+export const onQuickReset = (cb: () => void): Promise<UnlistenFn> => listen("quick-reset", () => cb());
+/** Main window: Quick Chat asked to open this chat id. */
+export const onOpenChat = (cb: (chatId: string) => void): Promise<UnlistenFn> =>
+  listen<string>("open-chat", (e) => cb(e.payload));

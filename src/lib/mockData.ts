@@ -9,6 +9,7 @@ import type {
   McpToolSummary,
   ParsedTranscript,
   PathsInfo,
+  QuickMode,
   Skill,
   SkillCandidate,
   ToolInfo,
@@ -1220,3 +1221,11 @@ export const fakeRequestLine = (n: number, ms: number) => `${hhmmss(ms)} · ${RE
 /** A tiny valid 1x1 PNG, used when no canvas is available. */
 export const TINY_PNG =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+// ---------- Quick Chat ----------
+
+/** Like `parse_mode` in quick.rs: the mode, or the same plain error message. */
+export function parseQuickMode(mode: string): QuickMode | { error: string } {
+  if (mode === "hidden" || mode === "overlay" || mode === "pip") return mode;
+  return { error: `Unknown Quick Chat mode "${mode}". Use overlay, pip or hidden.` };
+}

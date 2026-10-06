@@ -2,6 +2,7 @@
 // with realistic data. Open http://localhost:1420/?mock=1 after `npm run dev`.
 // Scenarios: ?mock=1 (ready), ?mock=nolicense (opens on the License step),
 // ?mock=nofm, ?mock=setup (fresh install: every check passes, so setup completes on its own).
+// Add &window=quick to run the Quick Chat window instead of the main window.
 // Nothing here runs in the real app.
 // How it works: `mockIPC` from @tauri-apps/api/mocks installs a fake
 // `window.__TAURI_INTERNALS__` (so `isTauri()` is true) and sends every
@@ -35,6 +36,7 @@ import type {
   ParsedTranscript,
   PublicServerConfig,
   PublicServerStatus,
+  QuickMode,
   RunEvent,
   RunResult,
   Skill,
@@ -44,10 +46,14 @@ import type {
 } from "./types";
 
 export type MockScenario = "default" | "nolicense" | "nofm" | "setup";
+/** Label of the window this page pretends to be. */
+export type MockWindow = "main" | "quick";
 
 export interface MockOptions {
   /** Defaults to the `?mock=` URL value. */
   scenario?: MockScenario;
+  /** Defaults to the `?window=` URL value ("quick" or "main"). */
+  window?: MockWindow;
   /** Multiplies every fake delay. 0 makes everything instant (tests). */
   timeScale?: number;
 }
@@ -220,6 +226,8 @@ interface Args {
   payload?: unknown;
   message?: string;
   buttons?: unknown;
+  mode?: string;
+  hold?: boolean;
 }
 
 interface McpRuntime {
@@ -269,10 +277,14 @@ export class MockBackend {
   private serverTimer: ReturnType<typeof setInterval> | null = null;
   private serverTick = 0;
   private enginePid = 48107;
+  /** Quick Chat window state, like QuickState in quick.rs. */
+  private quick: { mode: QuickMode; hold: boolean };
 
-  constructor(scenario: MockScenario = "default", timeScale = 1) {
+  constructor(scenario: MockScenario = "default", timeScale = 1, windowLabel: MockWindow = "main") {
     this.scenario = scenario;
     this.timeScale = timeScale;
+    // The real window starts hidden; a Quick Chat preview starts as if the menu bar icon was clicked.
+    this.quick = { mode: windowLabel === "quick" ? "overlay" : "hidden", hold: false };
     const now = Date.now();
     this.config = D.seedConfig(scenario === "default");
     this.binaryFound = scenario !== "nofm";
@@ -335,6 +347,54 @@ export class MockBackend {
     }
   }
 
+  // ---------- Quick Chat (quick.rs) ----------
+
+  /** The current Quick Chat mode. */
+  get quickMode(): QuickMode {
+    return this.quick.mode;
+  }
+
+  private setQuickMode(mode: QuickMode) {
+    this.quick.mode = mode;
+    this.emit("quick-mode", mode);
+  }
+
+  /** A click outside the window: the overlay shrinks to the pill unless a file panel holds it. */
+  quickBlur() {
+    if (this.quick.mode === "overlay" && !this.quick.hold) this.setQuickMode("pip");
+  }
+
+  /** A click on the menu bar icon: open the overlay, or put it away when it is open. */
+  quickToggle() {
+    this.setQuickMode(this.quick.mode === "overlay" ? "pip" : "overlay");
+  }
+
+  private quickCommand(cmd: string, a: Args): unknown {
+    switch (cmd) {
+      case "quick_set_mode": {
+        const mode = D.parseQuickMode(a.mode ?? "");
+        if (typeof mode !== "string") fail(mode.error);
+        this.setQuickMode(mode);
+        return null;
+      }
+      case "quick_mode":
+        return this.quick.mode;
+      case "quick_close":
+        this.setQuickMode("hidden");
+        this.emit("quick-reset", null);
+        return null;
+      case "quick_hold":
+        this.quick.hold = !!a.hold;
+        return null;
+      case "open_main_window":
+        console.info(`[mock] The main window would open${a.chatId ? ` on chat ${a.chatId}` : ""}.`);
+        if (a.chatId) this.emit("open-chat", a.chatId);
+        return null;
+      default:
+        return null;
+    }
+  }
+
   // ---------- entry point ----------
 
   async handle(cmd: string, payload?: InvokeArgs): Promise<unknown> {
@@ -346,6 +406,14 @@ export class MockBackend {
 
   private async command(cmd: string, a: Args): Promise<unknown> {
     switch (cmd) {
+      // ----- Quick Chat -----
+      case "quick_set_mode":
+      case "quick_mode":
+      case "quick_close":
+      case "quick_hold":
+      case "open_main_window":
+        return this.quickCommand(cmd, a);
+
       // ----- app -----
       case "get_config":
         await this.sleep(20);
@@ -1655,6 +1723,11 @@ function scenarioFromUrl(): MockScenario {
   return (["nolicense", "nofm", "setup"] as const).find((s) => s === value) ?? "default";
 }
 
+function windowFromUrl(): MockWindow {
+  if (typeof location === "undefined") return "main";
+  return new URLSearchParams(location.search).get("window") === "quick" ? "quick" : "main";
+}
+
 /**
  * Installs the fake backend. Call before React renders. Returns null (and does
  * nothing) inside the real Tauri app.
@@ -1667,8 +1740,9 @@ export function installMocks(options: MockOptions = {}): MockBackend | null {
   }
   active?.dispose();
   const scenario = options.scenario ?? scenarioFromUrl();
-  const backend = new MockBackend(scenario, options.timeScale ?? 1);
-  mockWindows("main");
+  const label = options.window ?? windowFromUrl();
+  const backend = new MockBackend(scenario, options.timeScale ?? 1, label);
+  mockWindows(label);
   mockIPC((cmd, payload) => backend.handle(cmd, payload));
   const i = internals();
   if (i) {
@@ -1676,7 +1750,7 @@ export function installMocks(options: MockOptions = {}): MockBackend | null {
     i.convertFileSrc = () => samplePng();
   }
   active = backend;
-  console.info(`[mock] fmGUI mock mode (${scenario}). All data is fake. Nothing runs on this Mac.`);
+  console.info(`[mock] fmGUI mock mode (${scenario}, ${label} window). All data is fake. Nothing runs on this Mac.`);
   return backend;
 }
 

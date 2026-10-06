@@ -4,7 +4,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { respondArgs } from "./fmArgs";
-import { installMocks, uninstallMocks } from "./mock";
+import { installMocks, uninstallMocks, type MockBackend } from "./mock";
 import {
   countTokensFromArgs,
   evaluateMath,
@@ -15,7 +15,7 @@ import {
   schemaFromObjectArgs,
   splitForStream,
 } from "./mockData";
-import type { AgentEvent, LogLine, McpServerStatus, RunEvent } from "./types";
+import type { AgentEvent, LogLine, McpServerStatus, QuickMode, RunEvent } from "./types";
 
 describe("schema object builder", () => {
   it("matches the shape fm prints for flat properties", () => {
@@ -306,5 +306,59 @@ describe("nolicense scenario", () => {
     expect(r.exitCode).toBe(69);
     expect(r.error).toMatch(/license/);
     expect(await api.fmLicenseText()).toMatch(/^LEGAL NOTICE & TERMS/);
+  });
+});
+
+describe("Quick Chat window", () => {
+  let backend: MockBackend;
+
+  beforeAll(() => {
+    (globalThis as unknown as { window: unknown }).window = globalThis;
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    backend = installMocks({ scenario: "default", timeScale: 0, window: "quick" })!;
+  });
+
+  afterAll(() => {
+    uninstallMocks();
+    delete (globalThis as unknown as { window?: unknown }).window;
+  });
+
+  it("switches modes like quick.rs and tells the window", async () => {
+    const modes: QuickMode[] = [];
+    let resets = 0;
+    const stopModes = await api.onQuickMode((m) => modes.push(m));
+    const stopResets = await api.onQuickReset(() => resets++);
+
+    // A Quick Chat preview starts open.
+    expect(await api.quickMode()).toBe("overlay");
+    // A file panel holds the overlay open; after it, a click outside shrinks it.
+    await api.quickHold(true);
+    backend.quickBlur();
+    expect(await api.quickMode()).toBe("overlay");
+    await api.quickHold(false);
+    backend.quickBlur();
+    expect(await api.quickMode()).toBe("pip");
+    // The pill and the menu bar icon open it again.
+    await api.quickSetMode("overlay");
+    backend.quickToggle();
+    backend.quickToggle();
+    await api.quickClose();
+
+    expect(modes).toEqual(["pip", "overlay", "pip", "overlay", "hidden"]);
+    expect(resets).toBe(1);
+    await expect(api.quickSetMode("big" as QuickMode)).rejects.toBe(
+      'Unknown Quick Chat mode "big". Use overlay, pip or hidden.',
+    );
+    stopModes();
+    stopResets();
+  });
+
+  it("asks the main window to open a chat", async () => {
+    const opened: string[] = [];
+    const stop = await api.onOpenChat((id) => opened.push(id));
+    await api.openMainWindow("chat-budget");
+    await api.openMainWindow(null);
+    expect(opened).toEqual(["chat-budget"]);
+    stop();
   });
 });

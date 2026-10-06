@@ -104,8 +104,10 @@ export function ChatList(props: {
               tabIndex={0}
               aria-current={active ? "true" : undefined}
               className={cx("list-row cv-row", active && "list-row--active", editing && "cv-row--editing")}
+              // A click or an accessibility press always selects. Rename only starts from
+              // the Rename button or F2, never from a press (WebKit's simulated press could
+              // reach a double-click handler).
               onClick={() => !editing && props.onSelect(chat.id)}
-              onDoubleClick={() => startEdit(chat)}
               onKeyDown={(e) => {
                 // Keys typed in the rename field or on the row buttons belong to them.
                 if (editing || e.target !== e.currentTarget) return;

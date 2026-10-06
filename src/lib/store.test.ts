@@ -70,4 +70,19 @@ describe("app start-up", () => {
     expect(useApp.getState().route).toBe("setup");
     expect(useApp.getState().handoff.setupStep).toBe(0);
   });
+
+  it("opens a chat from Quick Chat, also when the Chat page is open already", async () => {
+    const { useApp } = await startApp("default");
+    useApp.getState().openChat("chat-1");
+    expect(useApp.getState().route).toBe("chat");
+    expect(useApp.getState().handoff).toEqual({ chatId: "chat-1" });
+    expect(useApp.getState().chatRequest).toBeNull();
+
+    // The open Chat page reads a request instead of the hand-off.
+    useApp.getState().openChat("chat-2");
+    const first = useApp.getState().chatRequest;
+    expect(first).toEqual({ id: "chat-2" });
+    useApp.getState().openChat("chat-2");
+    expect(useApp.getState().chatRequest).not.toBe(first);
+  });
 });
