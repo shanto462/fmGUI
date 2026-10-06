@@ -1,6 +1,7 @@
 // CONTRACT FILE (owned by the lead). Global UI state: navigation, config,
 // fm status, and small hand-offs between pages.
 
+import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import * as api from "./api";
 import type { AppConfig, FmStatus, PathsInfo } from "./types";
@@ -57,6 +58,10 @@ interface AppStore {
   dismissToast: (id: string) => void;
 }
 
+// Rust emits "config-changed" after every save, including saves the engine
+// makes itself (an "Always allow" approval). Keep the store in sync.
+let configListener: Promise<unknown> | null = null;
+
 export const useApp = create<AppStore>((set, get) => ({
   route: "overview",
   handoff: {},
@@ -77,6 +82,7 @@ export const useApp = create<AppStore>((set, get) => ({
   load: async () => {
     const [config, paths] = await Promise.all([api.getConfig(), api.getPaths()]);
     set({ config, paths, route: config.setupCompleted ? "overview" : "setup" });
+    configListener ??= listen<AppConfig>("config-changed", (e) => set({ config: e.payload }));
     await get().refreshStatus();
   },
 
