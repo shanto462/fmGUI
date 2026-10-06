@@ -22,7 +22,7 @@ Legend: ✅ done · 🔄 in progress · ⏳ pending · ⛔ blocked
 - 🔄 UI: agent chat + CLI sessions.
 - 🔄 UI: tools, MCP, skills pages with step-by-step setup wizards.
 - 🔄 UI: playground, schema builder, token counter, server page, docs viewer, settings.
-- 🔄 Docs: `docs/` folder with the full collected documentation.
+- ✅ Docs: 13 pages in `docs/` (overview, commands, serve API, transcripts, structured output, tools, limits, Python/clients, ecosystem, license, framework, sources). Almost all facts run on this Mac.
 
 ## Verify
 - ⏳ `cargo build`, `cargo test`, `npm run build` (TypeScript check).
