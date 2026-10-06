@@ -331,6 +331,46 @@ pub fn open_main_window(app: AppHandle, chat_id: Option<String>) {
     }
 }
 
+/// Windows whose page has loaded and rendered (see [`app_ready`]).
+#[derive(Default)]
+pub struct ReadyState {
+    main: AtomicBool,
+}
+
+/// The page calls this once it has rendered. The main window's signal also
+/// creates the hidden Quick Chat window: creating both webviews at the same
+/// moment during launch sometimes left the main window blank.
+#[tauri::command]
+pub fn app_ready(app: AppHandle, window: tauri::WebviewWindow) {
+    if window.label() == "main" && !app.state::<ReadyState>().main.swap(true, Ordering::SeqCst) {
+        let handle = app.clone();
+        // Off the IPC thread: building a window waits for the main thread.
+        tauri::async_runtime::spawn(async move {
+            if let Err(err) = ensure_window(&handle) {
+                eprintln!("fmGUI: could not create the Quick Chat window: {err}");
+            }
+        });
+    }
+}
+
+/// Safety net for a blank main window at launch: if the page has not said it
+/// is ready after a few seconds, reload it (twice at most).
+pub fn watch_main_ready(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        for _ in 0..2 {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            if app.state::<ReadyState>().main.load(Ordering::SeqCst) {
+                return;
+            }
+            eprintln!("fmGUI: the main window did not load, reloading it");
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.reload();
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

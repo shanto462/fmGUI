@@ -81,13 +81,22 @@ pub fn run() {
 
             app.manage(AppState::new(paths));
             app.manage(quick::QuickState::default());
+            app.manage(quick::ReadyState::default());
             exit_on_signals(app.handle().clone());
 
-            // Menu bar icon + Quick Chat. The window is created hidden now so
-            // the first open is instant.
+            // Menu bar icon + Quick Chat. The Quick Chat window is created
+            // (hidden) once the main window has loaded; see quick::app_ready.
             quick::setup_tray(app.handle())?;
-            quick::ensure_window(app.handle())?;
             quick::watch_main_window(app.handle());
+            quick::watch_main_ready(app.handle());
+
+            // Debug builds: FMGUI_DEVTOOLS=1 opens the Web Inspector at launch.
+            #[cfg(any(debug_assertions, feature = "diagnostics"))]
+            if std::env::var_os("FMGUI_DEVTOOLS").is_some() {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.open_devtools();
+                }
+            }
 
             // Warm the login-shell environment off the main thread (used by MCP + shell tools).
             std::thread::spawn(|| {
@@ -145,6 +154,7 @@ pub fn run() {
             quick::quick_close,
             quick::quick_hold,
             quick::open_main_window,
+            quick::app_ready,
             // fm CLI
             fm::commands::fm_run,
             fm::commands::fm_cancel,

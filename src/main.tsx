@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import React, { type ReactNode } from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import { isTauri } from "./lib/api";
+import { appReady, isTauri } from "./lib/api";
 import type { MockBackend } from "./lib/mock";
 import QuickApp from "./quick/QuickApp";
 
@@ -28,3 +28,6 @@ if (import.meta.env.DEV && backend && label === "quick") {
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<React.StrictMode>{root}</React.StrictMode>);
+
+// Tell Rust the page is alive (after the first paint).
+if (isTauri()) requestAnimationFrame(() => void appReady().catch(() => undefined));

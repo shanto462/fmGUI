@@ -156,3 +156,6 @@ export const onOpenChat = (cb: (chatId: string) => void): Promise<UnlistenFn> =>
 /** A chat was created, saved, renamed or deleted (by any window). Payload: chat id. */
 export const onChatsChanged = (cb: (chatId: string) => void): Promise<UnlistenFn> =>
   listen<string>("chats-changed", (e) => cb(e.payload));
+
+/** Tells Rust this window has rendered (Rust reloads a main window that stays blank). */
+export const appReady = () => invoke<void>("app_ready");

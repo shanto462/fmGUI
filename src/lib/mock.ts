@@ -413,6 +413,8 @@ export class MockBackend {
       case "quick_hold":
       case "open_main_window":
         return this.quickCommand(cmd, a);
+      case "app_ready":
+        return null;
 
       // ----- app -----
       case "get_config":
