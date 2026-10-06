@@ -1,9 +1,9 @@
 // Local state for the Chat view: loaded chats, live runs and context usage.
 // Streaming AgentEvents are applied here so a run keeps going even when the
-// user switches to another chat. OWNER: agent "ui-chat".
+// user switches to another chat.
 
 import type { AgentEvent, AgentStep, Chat, ChatMessage } from "../../lib/types";
-import { blankMessage, isTempId } from "./utils";
+import { blankMessage } from "./utils";
 
 export interface RunState {
   running: boolean;
@@ -88,23 +88,37 @@ function mapMessage(chat: Chat, id: string, fn: (m: ChatMessage) => ChatMessage)
   return { ...chat, messages: chat.messages.map((m) => (m.id === id ? fn(m) : m)) };
 }
 
-/** Puts the final assistant message in place of the live one. */
+/**
+ * Puts the final assistant message in place of the live one. When the turn
+ * failed, the saved message carries the error, so the run error is cleared and
+ * the error shows once (on the message). Text that streamed before the failure
+ * is kept.
+ */
 function finalize(chat: Chat, run: RunState, message: ChatMessage): { chat: Chat; run: RunState } {
   const targetId = run.liveId ?? message.id;
+  const live = chat.messages.find((m) => m.id === targetId);
+  const final = message.error && !message.text && live?.text ? { ...message, text: live.text } : message;
   let replaced = false;
   const messages = chat.messages.map((m) => {
     if (m.id === targetId || m.id === message.id) {
       if (replaced) return null;
       replaced = true;
-      return message;
+      return final;
     }
     return m;
   });
   const clean = messages.filter((m): m is ChatMessage => m !== null);
-  if (!replaced) clean.push(message);
+  if (!replaced) clean.push(final);
   return {
     chat: { ...chat, messages: clean, updatedAt: Date.now() },
-    run: { ...run, running: false, liveId: null, status: null, approvals: {} },
+    run: {
+      ...run,
+      running: false,
+      liveId: null,
+      status: null,
+      approvals: {},
+      error: final.error ? null : run.error,
+    },
   };
 }
 
@@ -148,14 +162,20 @@ function applyEvent(state: ChatState, chatId: string, event: AgentEvent): ChatSt
         return withChat(state, chatId, renamed, { ...run, liveId: event.messageId });
       }
       const live = blankMessage("assistant", { id: event.messageId });
-      return withChat(state, chatId, { ...chat, messages: [...chat.messages, live] }, { ...run, liveId: event.messageId });
+      return withChat(
+        state,
+        chatId,
+        { ...chat, messages: [...chat.messages, live] },
+        { ...run, liveId: event.messageId },
+      );
     }
     case "status":
       return withChat(state, chatId, chat, { ...run, status: event.text });
     case "step":
     case "approvalRequired": {
       const ensured = ensureLive(chat, run);
-      const step = event.type === "approvalRequired" ? { ...event.step, status: "pendingApproval" as const } : event.step;
+      const step =
+        event.type === "approvalRequired" ? { ...event.step, status: "pendingApproval" as const } : event.step;
       const nextChat = mapMessage(ensured.chat, ensured.liveId, (m) => ({ ...m, steps: upsertStep(m.steps, step) }));
       const approvals = { ...ensured.run.approvals };
       if (event.type === "approvalRequired") approvals[step.id] = event.approvalId;
@@ -171,17 +191,11 @@ function applyEvent(state: ChatState, chatId: string, event: AgentEvent): ChatSt
       const done = finalize(chat, run, event.message);
       return withChat(state, chatId, done.chat, done.run);
     }
-    case "error": {
-      const nextChat = dropEmptyLive(chat, run);
-      return withChat(state, chatId, nextChat, {
-        ...run,
-        running: false,
-        liveId: null,
-        status: null,
-        approvals: {},
-        error: event.message,
-      });
-    }
+    case "error":
+      // The engine sends "done" right after "error", with the error on the saved
+      // message. Keep the run (and any partial text) until then; if "done" never
+      // comes, finishRun shows this error.
+      return withChat(state, chatId, chat, { ...run, status: null, error: event.message });
   }
 }
 
@@ -206,7 +220,10 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "removeMessage": {
       const chat = state.chats[action.chatId];
       if (!chat) return state;
-      return withChat(state, action.chatId, { ...chat, messages: chat.messages.filter((m) => m.id !== action.messageId) });
+      return withChat(state, action.chatId, {
+        ...chat,
+        messages: chat.messages.filter((m) => m.id !== action.messageId),
+      });
     }
     case "startRun": {
       const chat = state.chats[action.chatId];
@@ -236,7 +253,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         liveId: null,
         status: null,
         approvals: {},
-        error: action.error ?? "The model stopped without an answer.",
+        error: action.error ?? run.error ?? "The model stopped without an answer.",
       });
     }
     case "clearError": {
@@ -246,6 +263,3 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     }
   }
 }
-
-/** True when the message is an optimistic user message the backend never saved. */
-export const isUnsavedUser = (m: ChatMessage) => m.role === "user" && isTempId(m.id);

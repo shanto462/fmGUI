@@ -1,4 +1,4 @@
-// MCP server templates for the "Add MCP server" wizard. OWNER: agent "ui-extend".
+// MCP server templates for the "Add MCP server" wizard.
 
 import { Brain, Clock, FlaskConical, Folder, GitBranch, Globe, ListChecks, Server, SquareTerminal } from "lucide-react";
 import type { ReactNode } from "react";
@@ -8,7 +8,11 @@ export type Requirement = "node" | "npx" | "uvx";
 
 export const REQUIREMENTS: Record<Requirement, { label: string; why: string; install: string }> = {
   node: { label: "Node.js", why: "Runs servers written in JavaScript.", install: "brew install node" },
-  npx: { label: "npx", why: "Downloads and starts the server package. It comes with Node.js.", install: "brew install node" },
+  npx: {
+    label: "npx",
+    why: "Downloads and starts the server package. It comes with Node.js.",
+    install: "brew install node",
+  },
   uvx: { label: "uv (uvx)", why: "Downloads and starts servers written in Python.", install: "brew install uv" },
 };
 

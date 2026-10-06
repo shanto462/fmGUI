@@ -1,5 +1,5 @@
 // Fake data and pure helpers for the browser mock mode (see mock.ts).
-// OWNER: agent "ui-mock". Placeholders only, no real personal data.
+// Placeholders only, no real personal data.
 
 import type {
   AgentStep,
@@ -258,7 +258,10 @@ export function pickAnswer(prompt: string): string {
 
 /** Evaluates + - * / % ^ and parentheses. Throws on bad input. No eval(). */
 export function evaluateMath(expression: string): number {
-  const src = expression.replace(/[×x]/g, "*").replace(/÷/g, "/").replace(/(\d),(?=\d{3}\b)/g, "$1");
+  const src = expression
+    .replace(/[×x]/g, "*")
+    .replace(/÷/g, "/")
+    .replace(/(\d),(?=\d{3}\b)/g, "$1");
   const tokens = src.match(/\d+(?:\.\d+)?|[-+*/%^()]|\S/g) ?? [];
   let i = 0;
   const peek = () => tokens[i];
@@ -682,10 +685,6 @@ export function transcriptSize(t: ParsedTranscript): number {
   return 900 + t.messages.reduce((n, m) => n + m.text.length + 420, 0) + (t.instructions?.length ?? 0);
 }
 
-export function transcriptText(t: ParsedTranscript): string {
-  return [t.instructions ?? "", ...t.messages.map((m) => m.text)].join("\n");
-}
-
 // ---------- agent chats ----------
 
 function step(partial: Partial<AgentStep> & Pick<AgentStep, "toolId" | "toolName" | "title" | "source">): AgentStep {
@@ -1055,10 +1054,6 @@ export const BUILTIN_TOOLS: BuiltinSeed[] = [
     ],
   },
 ];
-
-export const BUILTIN_TITLES: Record<string, string> = Object.fromEntries(
-  BUILTIN_TOOLS.map((t) => [t.name, t.title]),
-);
 
 export function toolTokenEstimate(name: string, description: string, schema: unknown): number {
   return estimateTokens(name + description + JSON.stringify(schema));

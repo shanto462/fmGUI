@@ -1,4 +1,4 @@
-// CONTRACT FILE (owned by the lead). Mirrors the Rust serde types exactly.
+// Mirrors the Rust serde types exactly.
 // Rust: src-tauri/src/config.rs, fm/*, engine/mod.rs, mcp/mod.rs, skills/mod.rs.
 
 // ---------- config.rs ----------
@@ -103,9 +103,7 @@ export interface PathsInfo {
 
 // ---------- fm/* ----------
 export type RunEvent =
-  | { kind: "started"; command: string }
-  | { kind: "stdout"; text: string }
-  | { kind: "stderr"; text: string };
+  { kind: "started"; command: string } | { kind: "stdout"; text: string } | { kind: "stderr"; text: string };
 
 export interface RunResult {
   command: string;

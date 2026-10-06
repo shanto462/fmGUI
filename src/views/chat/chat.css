@@ -1,4 +1,4 @@
-/* Chat view (and shared message styles for CLI Sessions). OWNER: agent "ui-chat".
+/* Chat view (and shared message styles for CLI Sessions).
    Every class starts with "cv-" so it cannot clash with other views. */
 
 /* ---------- Left list ---------- */
@@ -499,7 +499,9 @@
   border-radius: var(--radius-md);
   background: var(--surface-2);
   overflow: hidden;
-  transition: border-color 0.2s, background 0.2s;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
 }
 
 .cv-step__head {
@@ -682,12 +684,16 @@
   gap: 4px;
   padding: 10px 10px 8px 14px;
   border-radius: 22px;
-  transition: box-shadow 0.2s var(--ease), border-color 0.2s;
+  transition:
+    box-shadow 0.2s var(--ease),
+    border-color 0.2s;
 }
 
 .cv-composer:focus-within {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  box-shadow: var(--shadow-md), 0 0 0 3px var(--accent-softer);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 3px var(--accent-softer);
 }
 
 .cv-composer__input {
@@ -727,7 +733,10 @@
   background: var(--surface-3);
   color: var(--label-3);
   cursor: default;
-  transition: background 0.15s var(--ease), color 0.15s, transform 0.1s var(--ease);
+  transition:
+    background 0.15s var(--ease),
+    color 0.15s,
+    transform 0.1s var(--ease);
 }
 
 .cv-send--ready {
@@ -927,7 +936,10 @@
   box-shadow: var(--shadow-sm);
   text-align: left;
   cursor: default;
-  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease), background 0.15s;
+  transition:
+    transform 0.15s var(--ease),
+    box-shadow 0.15s var(--ease),
+    background 0.15s;
 }
 
 .cv-suggestion:hover {

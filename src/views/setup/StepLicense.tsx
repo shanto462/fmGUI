@@ -1,5 +1,4 @@
-// Setup step 4: the model license. The GUI never accepts it for the user (decision D14).
-// OWNER: agent "ui-shell".
+// Setup step 4: the model license. The GUI never accepts it for the user.
 
 import { FileText, RefreshCw, SquareTerminal } from "lucide-react";
 import { useEffect, useState } from "react";

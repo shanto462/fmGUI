@@ -1,4 +1,4 @@
-// Setup step 3: Apple Intelligence and the on-device model. OWNER: agent "ui-shell".
+// Setup step 3: Apple Intelligence and the on-device model.
 
 import { BrainCircuit, RefreshCw } from "lucide-react";
 import { Button, Callout } from "../../components/ui";

@@ -1,12 +1,15 @@
-// Token Counter: live `fm count-tokens` while you type. OWNER: agent "ui-build".
+// Token Counter: live `fm count-tokens` while you type.
 
 import { Gauge, Plus, Trash2 } from "lucide-react";
-import { Callout, CommandPreview, Empty, IconButton, Meter, Page, Spinner, TextArea, cx, formatNumber } from "../components/ui";
+import { Callout, CommandPreview, Empty, IconButton, Meter, Page, Spinner, TextArea } from "../components/ui";
 import { errorMessage } from "../lib/api";
-import { countTokensArgs, displayCommand } from "../lib/fmArgs";
+import { cx } from "../lib/cx";
+import { pickFile } from "../lib/dialogs";
+import { DEFAULT_FM_PATH, countTokensArgs, displayCommand } from "../lib/fmArgs";
+import { formatNumber } from "../lib/format";
 import { useApp } from "../lib/store";
 import { TranscriptPreview } from "./playground/TranscriptPreview";
-import { FileField, InspectorSection, Toolbar, Workbench, pickFile } from "./playground/workbench";
+import { FileField, InspectorSection, Toolbar, Workbench } from "./playground/workbench";
 import { isEmpty, toCountOptions, useTokenCount, useTokenInputs } from "./tokens/useTokenCount";
 import "./tokens/tokens.css";
 
@@ -18,7 +21,7 @@ export default function TokensView() {
   const toast = useApp((s) => s.toast);
   const count = useTokenCount(inputs);
 
-  const fmPath = config?.fmPath || "/usr/bin/fm";
+  const fmPath = config?.fmPath || DEFAULT_FM_PATH;
   const contextSize = config?.contextSize || status?.contextSize || 4096;
   const command = displayCommand(countTokensArgs(toCountOptions(inputs)), fmPath);
   const empty = isEmpty(inputs);
@@ -35,7 +38,11 @@ export default function TokensView() {
   const segs = inputs.textSegments;
 
   return (
-    <Page title="Token Counter" subtitle="Count tokens with fm count-tokens and see how much of the context is used." flush>
+    <Page
+      title="Token Counter"
+      subtitle="Count tokens with fm count-tokens and see how much of the context is used."
+      flush
+    >
       <Workbench
         sideWidth={400}
         side={
@@ -97,12 +104,14 @@ export default function TokensView() {
                 }
               />
               {inputs.transcriptPath && <TranscriptPreview path={inputs.transcriptPath} maxMessages={2} />}
-              <div className="xsmall muted">Counts a saved conversation, for example one from fm chat or the Playground.</div>
+              <div className="xsmall muted">
+                Counts a saved conversation, for example one from fm chat or the Playground.
+              </div>
             </InspectorSection>
             <InspectorSection title="Images" defaultOpen={false}>
               <div className="xsmall muted">
-                Images are not offered here. On macOS 27.0.1, <span className="mono">fm count-tokens --image</span> fails with
-                ModelManagerError 1001.
+                Images are not offered here. On macOS 27.0.1, <span className="mono">fm count-tokens --image</span>{" "}
+                fails with ModelManagerError 1001.
               </div>
             </InspectorSection>
           </>
@@ -150,8 +159,8 @@ export default function TokensView() {
 
               {total > contextSize && (
                 <Callout tone="error">
-                  This is larger than the context window. fm will fail with "The session's transcript exceeded the model's
-                  context size."
+                  This is larger than the context window. fm will fail with "The session's transcript exceeded the
+                  model's context size."
                 </Callout>
               )}
 
@@ -159,7 +168,9 @@ export default function TokensView() {
                 <div className="tk-stat">
                   <div className="tk-stat__label">Characters</div>
                   <div className="tk-stat__value">{formatNumber(chars)}</div>
-                  <div className="tk-stat__hint">{inputs.transcriptPath ? "Typed text only" : "Prompt, instructions, text"}</div>
+                  <div className="tk-stat__hint">
+                    {inputs.transcriptPath ? "Typed text only" : "Prompt, instructions, text"}
+                  </div>
                 </div>
                 <div className="tk-stat">
                   <div className="tk-stat__label">Characters per token</div>
@@ -171,7 +182,9 @@ export default function TokensView() {
                 <div className="tk-stat">
                   <div className="tk-stat__label">Counted as</div>
                   <div className="tk-stat__value tk-stat__value--text">{framed ? "Framed request" : "Raw content"}</div>
-                  <div className="tk-stat__hint">{framed ? "Includes chat template markers" : "Just the text tokens"}</div>
+                  <div className="tk-stat__hint">
+                    {framed ? "Includes chat template markers" : "Just the text tokens"}
+                  </div>
                 </div>
               </div>
 
@@ -187,7 +200,13 @@ export default function TokensView() {
                             <div className="xsmall muted">{p.hint}</div>
                           </td>
                           <td className="wb-num">
-                            {p.count != null ? formatNumber(p.count) : <span className="field__error" title={p.error ?? ""}>error</span>}
+                            {p.count != null ? (
+                              formatNumber(p.count)
+                            ) : (
+                              <span className="field__error" title={p.error ?? ""}>
+                                error
+                              </span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -207,8 +226,8 @@ export default function TokensView() {
                     around each turn. So one short instruction can add about 50 tokens.
                   </div>
                   <div>
-                    The context window holds the instructions, the whole conversation and the reply together. Keep room for
-                    the reply.
+                    The context window holds the instructions, the whole conversation and the reply together. Keep room
+                    for the reply.
                   </div>
                 </div>
               </Callout>

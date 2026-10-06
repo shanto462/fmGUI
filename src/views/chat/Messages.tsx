@@ -1,10 +1,12 @@
 // Message rendering shared by Chat and CLI Sessions: user bubbles on the right,
-// assistant answers on the left without a bubble. OWNER: agent "ui-chat".
+// assistant answers on the left without a bubble.
 
 import { Sparkles } from "lucide-react";
 import { memo, useState } from "react";
 import { Markdown } from "../../components/Markdown";
-import { Badge, Button, CopyButton, Modal, Spinner, cx, formatDuration, formatNumber } from "../../components/ui";
+import { Badge, Button, CopyButton, Modal, Spinner } from "../../components/ui";
+import { cx } from "../../lib/cx";
+import { formatDuration, formatNumber } from "../../lib/format";
 import type { ApprovalDecision, ChatMessage } from "../../lib/types";
 import { StepCard } from "./StepCard";
 
@@ -82,7 +84,8 @@ export const AssistantMessage = memo(function AssistantMessage(props: {
   const showStatus = streaming && !message.text;
   const waiting = !!props.approvals && Object.keys(props.approvals).length > 0;
   const tokens = message.usage?.totalTokens;
-  const hasFooter = !streaming && (message.text || message.durationMs != null || tokens || message.skillsUsed.length > 0);
+  const hasFooter =
+    !streaming && (message.text || message.durationMs != null || tokens || message.skillsUsed.length > 0);
 
   return (
     <div className="cv-msg cv-msg--assistant">
@@ -109,7 +112,9 @@ export const AssistantMessage = memo(function AssistantMessage(props: {
         <div className="cv-msg__footer">
           {message.durationMs != null && <span>{formatDuration(message.durationMs)}</span>}
           {!!tokens && (
-            <span title={`${formatNumber(message.usage!.promptTokens)} in, ${formatNumber(message.usage!.completionTokens)} out`}>
+            <span
+              title={`${formatNumber(message.usage!.promptTokens)} in, ${formatNumber(message.usage!.completionTokens)} out`}
+            >
               {formatNumber(tokens)} tokens
             </span>
           )}

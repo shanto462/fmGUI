@@ -1,24 +1,17 @@
-// Left inspector of the Playground: every `fm respond` option. OWNER: agent "ui-build".
+// Left inspector of the Playground: every `fm respond` option.
 
 import { Braces, ImageIcon, ImagePlus, Plus, Trash2, X } from "lucide-react";
 import { useEffect } from "react";
 import { Button, Chip, Field, IconButton, Segmented, Select, TextArea, TextInput, Toggle } from "../../components/ui";
 import { errorMessage, newId, readImageDataUrl } from "../../lib/api";
+import { IMAGE_EXTENSIONS, pickFile, pickFiles, pickSavePath } from "../../lib/dialogs";
 import type { BuiltinCliTool, Guardrails, UseCase } from "../../lib/fmArgs";
+import { jsonError } from "../../lib/format";
+import { baseName, tildePath } from "../../lib/paths";
 import { useApp } from "../../lib/store";
 import { usePlayground, type PgForm, type SchemaMode } from "./store";
 import { TranscriptPreview } from "./TranscriptPreview";
-import {
-  FileField,
-  IMAGE_EXTENSIONS,
-  InspectorRow,
-  InspectorSection,
-  baseName,
-  jsonError,
-  pickFile,
-  pickFiles,
-  pickSavePath,
-} from "./workbench";
+import { FileField, InspectorRow, InspectorSection } from "./workbench";
 
 const TOOLS: { id: BuiltinCliTool; label: string; hint: string }[] = [
   { id: "ocr", label: "OCR", hint: "Reads text in attached images" },
@@ -214,17 +207,30 @@ function TextSegments(props: { form: PgForm; setForm: (p: Partial<PgForm>) => vo
         </IconButton>
       }
     >
-      {segs.length === 0 && <div className="xsmall muted">Extra text added to the prompt with --text. Useful for long documents.</div>}
+      {segs.length === 0 && (
+        <div className="xsmall muted">Extra text added to the prompt with --text. Useful for long documents.</div>
+      )}
       {segs.map((s, i) => (
         <div key={i} className="wb-item">
-          <TextArea rows={2} value={s} placeholder={`Text segment ${i + 1}`} onChange={(e) => set(i, e.target.value)} spellCheck />
+          <TextArea
+            rows={2}
+            value={s}
+            placeholder={`Text segment ${i + 1}`}
+            onChange={(e) => set(i, e.target.value)}
+            spellCheck
+          />
           <IconButton label="Remove" onClick={() => setForm({ textSegments: segs.filter((_, j) => j !== i) })}>
             <Trash2 size={14} />
           </IconButton>
         </div>
       ))}
       {segs.length > 0 && (
-        <Button size="sm" variant="plain" icon={<Plus size={13} />} onClick={() => setForm({ textSegments: [...segs, ""] })}>
+        <Button
+          size="sm"
+          variant="plain"
+          icon={<Plus size={13} />}
+          onClick={() => setForm({ textSegments: [...segs, ""] })}
+        >
           Add segment
         </Button>
       )}
@@ -237,6 +243,7 @@ function Images(props: { form: PgForm; setForm: (p: Partial<PgForm>) => void; on
   const thumbs = usePlayground((s) => s.thumbs);
   const setThumb = usePlayground((s) => s.setThumb);
   const toolsOn = form.tools.length > 0;
+  const home = useApp((s) => s.paths?.homeDir);
 
   // Load thumbnails for new images.
   useEffect(() => {
@@ -285,7 +292,7 @@ function Images(props: { form: PgForm; setForm: (p: Partial<PgForm>) => void; on
               </div>
             )}
             <div className="wb-image__meta">
-              <div className="small truncate" title={img.path}>
+              <div className="small truncate" title={tildePath(img.path, home)}>
                 {baseName(img.path)}
               </div>
               <TextInput
@@ -298,7 +305,10 @@ function Images(props: { form: PgForm; setForm: (p: Partial<PgForm>) => void; on
                 style={{ minHeight: 24, padding: "2px 7px" }}
               />
             </div>
-            <IconButton label="Remove image" onClick={() => setForm({ images: form.images.filter((x) => x.id !== img.id) })}>
+            <IconButton
+              label="Remove image"
+              onClick={() => setForm({ images: form.images.filter((x) => x.id !== img.id) })}
+            >
               <X size={14} />
             </IconButton>
           </div>

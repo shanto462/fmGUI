@@ -1,10 +1,11 @@
-// Playground: build and run `fm respond` with every option. OWNER: agent "ui-build".
+// Playground: build and run `fm respond` with every option.
 // Layout: options inspector on the left, command + streamed output on the right.
 // State lives in ./playground/store.ts so a run keeps going when you switch pages.
 
 import { RotateCcw } from "lucide-react";
 import { useEffect } from "react";
 import { Button, Page } from "../components/ui";
+import { DEFAULT_FM_PATH } from "../lib/fmArgs";
 import { useApp } from "../lib/store";
 import { PlaygroundForm } from "./playground/PlaygroundForm";
 import { PlaygroundOutput } from "./playground/PlaygroundOutput";
@@ -35,7 +36,7 @@ export default function PlaygroundView() {
       if (e.key === "Enter") {
         e.preventDefault();
         const { config, paths } = useApp.getState();
-        startRun(paths?.tmpDir ?? null, config?.fmPath || "/usr/bin/fm");
+        startRun(paths?.tmpDir ?? null, config?.fmPath || DEFAULT_FM_PATH);
       } else if (e.key === ".") {
         e.preventDefault();
         stopRun().then((err) => err && toast(err, "error"));

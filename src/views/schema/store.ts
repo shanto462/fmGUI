@@ -1,5 +1,4 @@
 // Schema Builder state, kept outside the component so it survives page switches.
-// OWNER: agent "ui-build".
 
 import { create } from "zustand";
 import type { SchemaDefinition } from "../../lib/fmArgs";

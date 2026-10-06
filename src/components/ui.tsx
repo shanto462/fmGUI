@@ -1,13 +1,13 @@
-// CONTRACT FILE (owned by the lead). Shared UI primitives. Use these in every
-// view so the app looks consistent. Styles live in src/styles/base.css.
+// Shared UI primitives. Use these in every view so the app looks consistent.
+// Styles live in src/styles/base.css.
 
 import { AlertTriangle, Check, CheckCircle2, Copy, Info, X, XCircle } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { errorMessage } from "../lib/api";
+import { cx } from "../lib/cx";
+import { expandTilde, tildePath, tildeText } from "../lib/paths";
 import { useApp } from "../lib/store";
-
-const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(" ");
-export { cx };
 
 // ---------- Page ----------
 export function Page(props: {
@@ -37,7 +37,11 @@ export function Section(props: { title?: ReactNode; actions?: ReactNode; childre
     <section className="section">
       {(props.title || props.actions) && (
         <div className="row" style={{ marginBottom: 8 }}>
-          {props.title && <h3 className="section__title" style={{ margin: 0 }}>{props.title}</h3>}
+          {props.title && (
+            <h3 className="section__title" style={{ margin: 0 }}>
+              {props.title}
+            </h3>
+          )}
           <div className="spacer" />
           {props.actions}
         </div>
@@ -64,12 +68,7 @@ export function Button(
       type="button"
       {...rest}
       disabled={disabled || loading}
-      className={cx(
-        "btn",
-        variant !== "default" && `btn--${variant}`,
-        size !== "md" && `btn--${size}`,
-        className,
-      )}
+      className={cx("btn", variant !== "default" && `btn--${variant}`, size !== "md" && `btn--${size}`, className)}
     >
       {loading ? <span className="spinner" /> : icon}
       {children}
@@ -88,15 +87,20 @@ export function IconButton(
   );
 }
 
-export function CopyButton(props: { text: string; label?: string; size?: "sm" | "md" }) {
+export function CopyButton(props: { text: string; label?: string }) {
+  const toast = useApp((s) => s.toast);
   const [copied, setCopied] = useState(false);
   return (
     <IconButton
       label={props.label ?? "Copy"}
       onClick={async () => {
-        await navigator.clipboard.writeText(props.text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1200);
+        try {
+          await navigator.clipboard.writeText(props.text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        } catch (err) {
+          toast(`Could not copy. ${errorMessage(err)}`, "error");
+        }
       }}
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
@@ -110,13 +114,34 @@ export function Field(props: { label?: ReactNode; hint?: ReactNode; error?: Reac
     <label className="field">
       {props.label && <span className="field__label">{props.label}</span>}
       {props.children}
-      {props.error ? <span className="field__error">{props.error}</span> : props.hint && <span className="field__hint">{props.hint}</span>}
+      {props.error ? (
+        <span className="field__error">{props.error}</span>
+      ) : (
+        props.hint && <span className="field__hint">{props.hint}</span>
+      )}
     </label>
   );
 }
 
 export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input spellCheck={false} {...props} className={cx("input", props.className)} />;
+}
+
+/**
+ * A text field for a file or folder path. It shows the home folder as "~" and
+ * hands back the full path, so "~/Documents" is saved as an absolute path.
+ */
+export function PathInput(
+  props: Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> & {
+    value: string;
+    onChange: (path: string) => void;
+  },
+) {
+  const home = useApp((s) => s.paths?.homeDir);
+  const { value, onChange, ...rest } = props;
+  return (
+    <TextInput {...rest} value={tildePath(value, home)} onChange={(e) => onChange(expandTilde(e.target.value, home))} />
+  );
 }
 
 export function TextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
@@ -130,7 +155,12 @@ export function Select<T extends string>(props: {
   style?: React.CSSProperties;
 }) {
   return (
-    <select className="select" value={props.value} style={props.style} onChange={(e) => props.onChange(e.target.value as T)}>
+    <select
+      className="select"
+      value={props.value}
+      style={props.style}
+      onChange={(e) => props.onChange(e.target.value as T)}
+    >
       {props.options.map((o) => (
         <option key={o.value} value={o.value}>
           {o.label}
@@ -140,7 +170,12 @@ export function Select<T extends string>(props: {
   );
 }
 
-export function Toggle(props: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }) {
+export function Toggle(props: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  label?: string;
+}) {
   return (
     <button
       type="button"
@@ -187,7 +222,11 @@ export function Chip(props: { on: boolean; onClick: () => void; children: ReactN
 }
 
 // ---------- Status ----------
-export function Badge(props: { tone?: "accent" | "green" | "orange" | "red" | "purple"; children: ReactNode; title?: string }) {
+export function Badge(props: {
+  tone?: "accent" | "green" | "orange" | "red" | "purple";
+  children: ReactNode;
+  title?: string;
+}) {
   return (
     <span className={cx("badge", props.tone && `badge--${props.tone}`)} title={props.title}>
       {props.children}
@@ -219,7 +258,11 @@ export function Empty(props: { icon?: ReactNode; title: ReactNode; children?: Re
     <div className="empty">
       {props.icon}
       <div className="empty__title">{props.title}</div>
-      {props.children && <div className="small" style={{ maxWidth: 420 }}>{props.children}</div>}
+      {props.children && (
+        <div className="small" style={{ maxWidth: 420 }}>
+          {props.children}
+        </div>
+      )}
       {props.action && <div style={{ marginTop: 8 }}>{props.action}</div>}
     </div>
   );
@@ -239,11 +282,22 @@ export function Meter(props: { value: number; title?: string }) {
 }
 
 // ---------- Code ----------
+/** The text with the home folder shown as "~", so the user name stays off screen. */
+function useTilde(text: string): string {
+  const home = useApp((s) => s.paths?.homeDir);
+  return tildeText(text, home);
+}
+
+/** Code or output with a copy button. Shows "~" for the home folder; the copy button copies the real text. */
 export function CodeBlock(props: { code: string; wrap?: boolean; maxHeight?: number; copy?: boolean }) {
+  const shown = useTilde(props.code);
   return (
     <div className={cx("code", props.wrap && "code--wrap")}>
-      <pre className="selectable" style={{ maxHeight: props.maxHeight, overflowY: props.maxHeight ? "auto" : undefined }}>
-        {props.code}
+      <pre
+        className="selectable"
+        style={{ maxHeight: props.maxHeight, overflowY: props.maxHeight ? "auto" : undefined }}
+      >
+        {shown}
       </pre>
       {props.copy !== false && (
         <span className="code__copy">
@@ -254,12 +308,16 @@ export function CodeBlock(props: { code: string; wrap?: boolean; maxHeight?: num
   );
 }
 
-/** Shows the exact `fm ...` command with a copy button. */
+/**
+ * Shows the exact `fm ...` command with a copy button. The home folder shows
+ * as "~"; the copy button copies the real command, so it runs as it is.
+ */
 export function CommandPreview(props: { command: string }) {
+  const shown = useTilde(props.command);
   return (
     <div className="command" title="The exact command this runs">
       <span className="command__prompt">%</span>
-      <span className="command__text">{props.command}</span>
+      <span className="command__text">{shown}</span>
       <CopyButton text={props.command} label="Copy command" />
     </div>
   );
@@ -273,27 +331,42 @@ export function Steps(props: {
   onSelect?: (index: number) => void;
   maxReachable?: number;
 }) {
-  const reachable = (i: number) => !!props.onSelect && i <= (props.maxReachable ?? props.current);
+  const { onSelect } = props;
+  const reachable = (i: number) => !!onSelect && i <= (props.maxReachable ?? props.current);
   return (
     <div className="steps">
-      {props.steps.map((s, i) => (
-        <div key={s} style={{ display: "contents" }}>
-          {i > 0 && <span className="steps__line" />}
-          <span
-            className={cx(
-              "steps__item",
-              i === props.current && "steps__item--active",
-              i < props.current && "steps__item--done",
-            )}
-            role={reachable(i) ? "button" : undefined}
-            style={reachable(i) && i !== props.current ? { cursor: "pointer" } : undefined}
-            onClick={reachable(i) ? () => props.onSelect!(i) : undefined}
-          >
+      {props.steps.map((s, i) => {
+        const className = cx(
+          "steps__item",
+          i === props.current && "steps__item--active",
+          i < props.current && "steps__item--done",
+        );
+        const content = (
+          <>
             <span className="steps__num">{i < props.current ? <Check size={11} /> : i + 1}</span>
             {s}
-          </span>
-        </div>
-      ))}
+          </>
+        );
+        return (
+          <div key={s} style={{ display: "contents" }}>
+            {i > 0 && <span className="steps__line" />}
+            {onSelect && reachable(i) ? (
+              <button
+                type="button"
+                className={cx(className, "steps__item--button")}
+                aria-current={i === props.current ? "step" : undefined}
+                onClick={() => onSelect(i)}
+              >
+                {content}
+              </button>
+            ) : (
+              <span className={className} aria-current={i === props.current ? "step" : undefined}>
+                {content}
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -308,23 +381,24 @@ export function Modal(props: {
   dismissible?: boolean;
   children: ReactNode;
 }) {
+  const { onClose } = props;
   const dismissible = props.dismissible !== false;
+  const titleId = useId();
   useEffect(() => {
     if (!dismissible) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && props.onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [props.onClose, dismissible]);
+  }, [onClose, dismissible]);
   return createPortal(
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => dismissible && e.target === e.currentTarget && props.onClose()}
-    >
-      <div className={cx("modal", props.wide && "modal--wide")} role="dialog" aria-modal>
+    <div className="modal-backdrop" onMouseDown={(e) => dismissible && e.target === e.currentTarget && onClose()}>
+      <div className={cx("modal", props.wide && "modal--wide")} role="dialog" aria-modal aria-labelledby={titleId}>
         <div className="modal__header row">
-          <h2 className="modal__title">{props.title}</h2>
+          <h2 className="modal__title" id={titleId}>
+            {props.title}
+          </h2>
           <div className="spacer" />
-          <IconButton label="Close" onClick={props.onClose}>
+          <IconButton label="Close" onClick={onClose}>
             <X size={16} />
           </IconButton>
         </div>
@@ -340,33 +414,27 @@ export function Modal(props: {
 export function Toasts() {
   const toasts = useApp((s) => s.toasts);
   const dismiss = useApp((s) => s.dismissToast);
+  // Errors from the backend can name files; keep the user name off screen.
+  const home = useApp((s) => s.paths?.homeDir);
   return (
-    <div className="toasts">
+    <div className="toasts" role="status" aria-live="polite">
       {toasts.map((t) => (
-        <div key={t.id} className={cx("toast", `toast--${t.kind}`)} onClick={() => dismiss(t.id)}>
-          {t.kind === "error" ? <XCircle size={16} /> : t.kind === "success" ? <CheckCircle2 size={16} /> : <Info size={16} />}
-          <span className="selectable">{t.text}</span>
+        <div
+          key={t.id}
+          className={cx("toast", `toast--${t.kind}`)}
+          title="Click to close"
+          onClick={() => dismiss(t.id)}
+        >
+          {t.kind === "error" ? (
+            <XCircle size={16} />
+          ) : t.kind === "success" ? (
+            <CheckCircle2 size={16} />
+          ) : (
+            <Info size={16} />
+          )}
+          <span className="selectable">{tildeText(t.text, home)}</span>
         </div>
       ))}
     </div>
   );
-}
-
-// ---------- Helpers ----------
-export function formatTime(ms: number): string {
-  const d = new Date(ms);
-  const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  return sameDay
-    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
-export function formatDuration(ms: number | null | undefined): string {
-  if (ms == null) return "";
-  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
-}
-
-export function formatNumber(n: number): string {
-  return n.toLocaleString("en-US");
 }

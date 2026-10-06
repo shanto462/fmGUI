@@ -1,12 +1,20 @@
 // The message composer: a glass card with an auto-growing text field,
 // image attachments and a Send / Stop button. Shared by Chat and CLI Sessions.
-// OWNER: agent "ui-chat".
 
 import { ArrowUp, ImagePlus, Square, X } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
-import { IconButton, Spinner, cx } from "../../components/ui";
-import { ModelReadyHint, type ModelReady } from "./ModelReady";
+import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
+import { IconButton, Spinner } from "../../components/ui";
+import { cx } from "../../lib/cx";
+import { ModelReadyHint } from "./ModelReady";
+import { type ModelReady } from "./useModelReady";
 import { imageFiles } from "./utils";
+
+/** Grows the text field with its content, up to 220 px. */
+function fitHeight(el: HTMLTextAreaElement | null) {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+}
 
 export interface ComposerAttachment {
   id: string;
@@ -41,17 +49,9 @@ export function Composer(props: {
   const ref = props.textareaRef ?? localRef;
   const hasContent = props.value.trim().length > 0 || props.attachments.length > 0;
   const attachmentsLoading = props.attachments.some((a) => a.loading);
-  const canSend =
-    props.ready.ready && !props.running && hasContent && !attachmentsLoading && !props.blockedReason;
+  const canSend = props.ready.ready && !props.running && hasContent && !attachmentsLoading && !props.blockedReason;
 
-  const fitHeight = useCallback(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
-  }, [ref]);
-
-  useLayoutEffect(fitHeight, [props.value, fitHeight]);
+  useLayoutEffect(() => fitHeight(ref.current), [props.value, ref]);
 
   // Line wrapping changes when the window gets wider or narrower.
   useEffect(() => {
@@ -61,14 +61,14 @@ export function Composer(props: {
     const ro = new ResizeObserver(() => {
       if (el.offsetWidth === width) return;
       width = el.offsetWidth;
-      fitHeight();
+      fitHeight(el);
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [fitHeight, ref]);
+  }, [ref]);
 
   const sendTitle = !props.ready.ready
-    ? props.ready.hint ?? "The model is not ready"
+    ? (props.ready.hint ?? "The model is not ready")
     : props.blockedReason
       ? props.blockedReason
       : attachmentsLoading
@@ -170,7 +170,8 @@ export function Composer(props: {
       </div>
       {props.ready.ready ? (
         <div className="cv-composer-foot">
-          <span className="kbd">Enter</span> to send <span className="kbd">Shift</span>+<span className="kbd">Enter</span> for a new line
+          <span className="kbd">Enter</span> to send <span className="kbd">Shift</span>+
+          <span className="kbd">Enter</span> for a new line
         </div>
       ) : (
         <ModelReadyHint ready={props.ready} />

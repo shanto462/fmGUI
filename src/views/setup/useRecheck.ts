@@ -1,4 +1,4 @@
-// Re-runs the fm status check and remembers if it failed. OWNER: agent "ui-shell".
+// Re-runs the fm status check and remembers if it failed.
 
 import { useCallback, useState } from "react";
 import { useApp } from "../../lib/store";

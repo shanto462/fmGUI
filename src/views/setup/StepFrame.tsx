@@ -1,4 +1,4 @@
-// Common layout for one setup step: big icon, title, lead text, content. OWNER: agent "ui-shell".
+// Common layout for one setup step: big icon, title, lead text, content.
 
 import type { ReactNode } from "react";
 import { IconTile, type TileColor } from "../overview/shared";

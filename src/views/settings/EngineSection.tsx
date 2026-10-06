@@ -1,9 +1,10 @@
-// Settings: private chat engine status and restart. OWNER: agent "ui-shell".
+// Settings: private chat engine status and restart.
 
 import { RefreshCw, Zap } from "lucide-react";
 import { Button, Callout, Section, StatusDot } from "../../components/ui";
+import { tildePath } from "../../lib/paths";
 import { useApp } from "../../lib/store";
-import { tildify, useEngine } from "../overview/shared";
+import { useEngine } from "../overview/hooks";
 import { SettingRow } from "./SettingRow";
 
 export default function EngineSection() {
@@ -34,7 +35,7 @@ export default function EngineSection() {
             st?.socketPath ? (
               <>
                 A private fm serve for Chat. Socket:{" "}
-                <span className="mono selectable settings-path">{tildify(st.socketPath, home)}</span>
+                <span className="mono selectable settings-path">{tildePath(st.socketPath, home)}</span>
               </>
             ) : (
               "A private fm serve for Chat. It starts on its own when you chat."

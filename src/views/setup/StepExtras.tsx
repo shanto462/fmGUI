@@ -1,8 +1,8 @@
-// Setup step 6 (optional): tools, MCP servers, skills. OWNER: agent "ui-shell".
+// Setup step 6 (optional): tools, MCP servers, skills.
 
 import { ArrowRight, Gauge, Plug, Sparkles, Wand2, Wrench } from "lucide-react";
 import type { ReactNode } from "react";
-import { formatNumber } from "../../components/ui";
+import { formatNumber } from "../../lib/format";
 import { useApp, type Route } from "../../lib/store";
 import { IconTile, type TileColor } from "../overview/shared";
 import { StepFrame } from "./StepFrame";
@@ -47,7 +47,12 @@ export default function StepExtras() {
     >
       <div className="setup-extras">
         {CARDS.map((c) => (
-          <button key={c.route} type="button" className="card setup-extra" onClick={() => navigate(c.route, { openWizard: true })}>
+          <button
+            key={c.route}
+            type="button"
+            className="card setup-extra"
+            onClick={() => navigate(c.route, { openWizard: true })}
+          >
             <IconTile color={c.color} size="md">
               {c.icon}
             </IconTile>

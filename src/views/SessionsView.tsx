@@ -1,10 +1,21 @@
 // CLI sessions in ~/.fm/sessions, shared with `fm chat`. Browse, rename,
-// delete, and keep talking with `fm respond --resume`. OWNER: agent "ui-chat".
+// delete, and keep talking with `fm respond --resume`.
 
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { FolderOpen, ImagePlus, MessagesSquare, Pencil, RefreshCw, ScrollText, Search, SquarePen, SquareTerminal, Trash } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Callout, CommandPreview, CopyButton, IconButton, Spinner, cx, formatTime } from "../components/ui";
+import {
+  FolderOpen,
+  ImagePlus,
+  MessagesSquare,
+  Pencil,
+  RefreshCw,
+  ScrollText,
+  Search,
+  SquarePen,
+  SquareTerminal,
+  Trash,
+} from "lucide-react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
+import { Button, Callout, CommandPreview, CopyButton, IconButton, Spinner } from "../components/ui";
 import {
   cliSessionDelete,
   cliSessionNewPath,
@@ -19,16 +30,21 @@ import {
   readImageDataUrl,
   saveTempFile,
 } from "../lib/api";
-import { displayCommand, respondArgs, validateRespond, type RespondOptions } from "../lib/fmArgs";
+import { cx } from "../lib/cx";
+import { DEFAULT_FM_PATH, displayCommand, respondArgs, validateRespond, type RespondOptions } from "../lib/fmArgs";
+import { formatTime, pluralize } from "../lib/format";
+import { baseName } from "../lib/paths";
+import { pressable } from "../lib/pressable";
 import { useApp } from "../lib/store";
 import type { CliSession, ParsedTranscript, RunResult } from "../lib/types";
 import { Composer, type ComposerAttachment } from "./chat/Composer";
 import { useAutoScroll, useElementHeight, useImageFileDrop } from "./chat/hooks";
 import { AnswerText, ImageThumbs, MessageError, StatusLine, UserMessage } from "./chat/Messages";
-import { useModelReady } from "./chat/ModelReady";
-import { basename, imageFiles, pickImagePaths, pluralize, readFileAsDataUrl } from "./chat/utils";
+import { useModelReady } from "./chat/useModelReady";
+import { imageFiles, pickImagePaths, readFileAsDataUrl } from "./chat/utils";
 import { NewSessionModal } from "./sessions/NewSessionModal";
-import { DEFAULT_CLI_OPTIONS, RunOptionsButton, type CliRunOptions } from "./sessions/RunOptions";
+import { DEFAULT_CLI_OPTIONS, type CliRunOptions } from "./sessions/options";
+import { RunOptionsButton } from "./sessions/RunOptions";
 import { DeleteSessionModal, RenameSessionModal } from "./sessions/SessionModals";
 import "./chat/chat.css";
 import "./sessions/sessions.css";
@@ -80,7 +96,7 @@ function extensionFor(file: File): string {
 export default function SessionsView() {
   const toast = useApp((s) => s.toast);
   const navigate = useApp((s) => s.navigate);
-  const fmPath = useApp((s) => s.config?.fmPath ?? "/usr/bin/fm");
+  const fmPath = useApp((s) => s.config?.fmPath ?? DEFAULT_FM_PATH);
   const sessionsDir = useApp((s) => s.paths?.cliSessionsDir ?? null);
   const ready = useModelReady();
 
@@ -103,52 +119,73 @@ export default function SessionsView() {
   const [showNew, setShowNew] = useState(false);
 
   const { scrollRef, contentRef, onScroll, scrollToBottom } = useAutoScroll(selected);
-  const dock = useElementHeight<HTMLDivElement>();
+  const { ref: dockRef, height: dockHeight } = useElementHeight<HTMLDivElement>();
 
   const onDisk = useCallback((name: string | null) => !!name && !!sessions?.some((s) => s.name === name), [sessions]);
   const session = useMemo(
-    () => sessions?.find((s) => s.name === selected) ?? (pendingNew && pendingNew.name === selected ? pendingNew : null),
+    () =>
+      sessions?.find((s) => s.name === selected) ?? (pendingNew && pendingNew.name === selected ? pendingNew : null),
     [sessions, selected, pendingNew],
   );
   const isPendingNew = !!session && session === pendingNew && !onDisk(session.name);
   const runHere = !!run && run.sessionName === selected;
 
   // ---------- loading ----------
-  const loadList = useCallback(async (): Promise<CliSession[] | null> => {
-    try {
-      const list = await cliSessionsList();
-      setSessions(list);
-      setListError(null);
-      return list;
-    } catch (err) {
-      setListError(errorMessage(err));
-      return null;
-    }
-  }, []);
+  // Never rejects: a failure shows in the list.
+  const loadList = useCallback(
+    (): Promise<CliSession[] | null> =>
+      cliSessionsList().then(
+        (list) => {
+          setSessions(list);
+          setListError(null);
+          return list;
+        },
+        (err) => {
+          setListError(errorMessage(err));
+          return null;
+        },
+      ),
+    [],
+  );
 
-  const loadTranscript = useCallback(async (name: string) => {
+  // Never rejects. The error is keyed by session name, so it only shows for that session.
+  const readTranscript = useCallback(
+    (name: string) =>
+      cliSessionRead(name).then(
+        (data) => {
+          setTranscript({ name, data });
+          setTranscriptError((e) => (e?.name === name ? null : e));
+          return true;
+        },
+        (err) => {
+          setTranscriptError({ name, message: errorMessage(err) });
+          return false;
+        },
+      ),
+    [],
+  );
+
+  /** "Try again" and refresh: hide the old error while reading. */
+  const loadTranscript = (name: string) => {
     setTranscriptError(null);
-    try {
-      const data = await cliSessionRead(name);
-      setTranscript({ name, data });
-      return true;
-    } catch (err) {
-      setTranscriptError({ name, message: errorMessage(err) });
-      return false;
-    }
-  }, []);
+    return readTranscript(name);
+  };
 
   useEffect(() => {
-    loadList().then((list) => {
+    void loadList().then((list) => {
       if (list) setSelected((cur) => cur ?? list[0]?.name ?? null);
     });
   }, [loadList]);
 
+  // Read the transcript when the selection changes. Runs reload it themselves,
+  // and a new session that is not saved yet has nothing to read.
+  const readSelected = useEffectEvent((name: string) => {
+    if (pendingNew?.name === name && !onDisk(name)) return;
+    void readTranscript(name);
+  });
   useEffect(() => {
-    if (!selected || (pendingNew?.name === selected && !onDisk(selected))) return;
-    // Only when the selection changes; runs reload the transcript themselves.
-    loadTranscript(selected);
-  }, [selected, loadTranscript]);
+    if (selected) readSelected(selected);
+  }, [selected]);
 
   async function refresh() {
     setRefreshing(true);
@@ -183,7 +220,8 @@ export default function SessionsView() {
         runId,
       );
       if (result.cancelled) ok = true;
-      else if (result.error || result.exitCode !== 0) setFailure({ sessionName: ctx.sessionName, ...describeFailure(result) });
+      else if (result.error || result.exitCode !== 0)
+        setFailure({ sessionName: ctx.sessionName, ...describeFailure(result) });
       else ok = true;
     } catch (err) {
       setFailure({ sessionName: ctx.sessionName, text: errorMessage(err), detail: "", license: false });
@@ -247,11 +285,14 @@ export default function SessionsView() {
     } catch (err) {
       return `Could not make a file for the session. ${errorMessage(err)}`;
     }
-    const name = basename(path).replace(/\.json$/i, "");
+    const name = baseName(path).replace(/\.json$/i, "");
     const fresh: CliSession = { name, path, modifiedMs: Date.now(), sizeBytes: 0, preview: prompt, turns: 0 };
     setPendingNew(fresh);
     setSelected(name);
-    setTranscript({ name, data: { modelName: null, instructions: instructions || null, messages: [], systemVersion: null } });
+    setTranscript({
+      name,
+      data: { modelName: null, instructions: instructions || null, messages: [], systemVersion: null },
+    });
     setTranscriptError(null);
     setShowNew(false);
     const args = respondArgs({
@@ -319,7 +360,13 @@ export default function SessionsView() {
     setAttachments((a) => a.map((x) => (x.id === id ? { ...x, ...patch } : x)));
 
   const addPaths = useCallback((paths: string[]) => {
-    const items: CliAttachment[] = paths.map((p) => ({ id: newId(), path: p, src: null, name: basename(p), loading: true }));
+    const items: CliAttachment[] = paths.map((p) => ({
+      id: newId(),
+      path: p,
+      src: null,
+      name: baseName(p),
+      loading: true,
+    }));
     setAttachments((a) => [...a, ...items]);
     for (const item of items) {
       // The preview is only for show; fm reads the file itself.
@@ -398,6 +445,7 @@ export default function SessionsView() {
             <input
               className="cv-search__input"
               placeholder="Search"
+              aria-label="Search sessions"
               value={query}
               spellCheck={false}
               onChange={(e) => setQuery(e.target.value)}
@@ -422,11 +470,14 @@ export default function SessionsView() {
             {pendingNew && !onDisk(pendingNew.name) && (
               <div
                 className={cx("list-row cv-row", selected === pendingNew.name && "list-row--active")}
-                onClick={() => select(pendingNew.name)}
+                aria-current={selected === pendingNew.name ? "true" : undefined}
+                {...pressable(() => select(pendingNew.name))}
               >
                 <div className="cv-row__top">
                   <span className="list-row__title">{pendingNew.name}</span>
-                  <span className="cv-row__time">{run?.sessionName === pendingNew.name ? <Spinner /> : "Not saved"}</span>
+                  <span className="cv-row__time">
+                    {run?.sessionName === pendingNew.name ? <Spinner /> : "Not saved"}
+                  </span>
                 </div>
                 <div className="list-row__meta">{pendingNew.preview}</div>
               </div>
@@ -443,11 +494,9 @@ export default function SessionsView() {
             {filtered.map((s) => (
               <div
                 key={s.path}
-                role="button"
-                tabIndex={0}
                 className={cx("list-row cv-row", s.name === selected && "list-row--active")}
-                onClick={() => select(s.name)}
-                onKeyDown={(e) => e.key === "Enter" && select(s.name)}
+                aria-current={s.name === selected ? "true" : undefined}
+                {...pressable(() => select(s.name))}
               >
                 <div className="cv-row__top">
                   <span className="list-row__title">{s.name}</span>
@@ -505,7 +554,7 @@ export default function SessionsView() {
           </header>
 
           <div className="cv-scroll" ref={scrollRef} onScroll={onScroll}>
-            <div className="cv-thread" ref={contentRef} style={{ paddingBottom: dock.height + 28 }}>
+            <div className="cv-thread" ref={contentRef} style={{ paddingBottom: dockHeight + 28 }}>
               {!session && sessions !== null && (
                 <div className="sv-empty">
                   <div className="cv-welcome__icon">
@@ -517,7 +566,12 @@ export default function SessionsView() {
                     ~/.fm/sessions. Read them here, keep talking, or open them again in Terminal with{" "}
                     <span className="mono">fm chat --resume</span>.
                   </p>
-                  <Button variant="primary" icon={<SquarePen size={14} />} onClick={() => setShowNew(true)} disabled={!!run}>
+                  <Button
+                    variant="primary"
+                    icon={<SquarePen size={14} />}
+                    onClick={() => setShowNew(true)}
+                    disabled={!!run}
+                  >
                     New CLI session
                   </Button>
                 </div>
@@ -549,7 +603,7 @@ export default function SessionsView() {
                     </Callout>
                   )}
 
-                  {!shownTranscript && !transcriptError && !isPendingNew && (
+                  {!shownTranscript && transcriptError?.name !== selected && !isPendingNew && (
                     <div className="cv-center">
                       <Spinner />
                     </div>
@@ -596,7 +650,11 @@ export default function SessionsView() {
                     <>
                       <UserMessage text={run.prompt} images={run.images} pending />
                       <div className="cv-msg cv-msg--assistant">
-                        {run.output ? <AnswerText text={run.output} streaming /> : <StatusLine text="Waiting for fm…" />}
+                        {run.output ? (
+                          <AnswerText text={run.output} streaming />
+                        ) : (
+                          <StatusLine text="Waiting for fm…" />
+                        )}
                       </div>
                     </>
                   )}
@@ -626,7 +684,7 @@ export default function SessionsView() {
             </div>
           </div>
 
-          <div className="cv-dock" ref={dock.ref} style={{ display: session ? undefined : "none" }}>
+          <div className="cv-dock" ref={dockRef} style={{ display: session ? undefined : "none" }}>
             <Composer
               value={draft}
               onChange={setDraft}

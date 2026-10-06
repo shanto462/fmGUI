@@ -1,10 +1,12 @@
-// Monospaced, auto-scrolling log panel for the public `fm serve`. OWNER: agent "ui-build".
+// Monospaced, auto-scrolling log panel for the public `fm serve`.
 
 import { ScrollText } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
 import { Empty } from "../../components/ui";
+import { stripAnsi } from "../../lib/format";
+import { tildeText } from "../../lib/paths";
+import { useApp } from "../../lib/store";
 import type { LogLine } from "../../lib/types";
-import { stripAnsi } from "../playground/workbench";
 
 function time(ts: number): string {
   const ms = ts < 1e12 ? ts * 1000 : ts; // seconds or milliseconds
@@ -12,6 +14,7 @@ function time(ts: number): string {
 }
 
 export function LogPanel(props: { logs: LogLine[] }) {
+  const home = useApp((s) => s.paths?.homeDir);
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
 
@@ -40,7 +43,7 @@ export function LogPanel(props: { logs: LogLine[] }) {
       {props.logs.map((l, i) => (
         <div key={i} className="sv-log">
           <span className="sv-log__ts">{time(l.ts)}</span>
-          <span className="sv-log__line">{stripAnsi(l.line)}</span>
+          <span className="sv-log__line">{tildeText(stripAnsi(l.line), home)}</span>
         </div>
       ))}
     </div>

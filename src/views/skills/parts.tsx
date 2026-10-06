@@ -1,5 +1,4 @@
 // Skill editing pieces: mode cards, body editor, editor modal, import modal, new skill wizard.
-// OWNER: agent "ui-extend".
 
 import { Download, FolderInput, Sparkles } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -15,15 +14,16 @@ import {
   Steps,
   TextArea,
   TextInput,
-  formatNumber,
 } from "../../components/ui";
 import { errorMessage, skillImport, skillSave, skillsImportCandidates } from "../../lib/api";
+import { pickFolder } from "../../lib/dialogs";
+import { estimateTokens, formatNumber } from "../../lib/format";
 import { useApp } from "../../lib/store";
 import type { Skill, SkillCandidate, SkillMode } from "../../lib/types";
-import { ChoiceCard, Tile, estimateTokens, pickFolder } from "../tools/shared";
+import { ChoiceCard, Tile } from "../tools/shared";
 import { LARGE_SKILL_TOKENS, SKILL_NAME_RE, SKILL_TEMPLATES, toSkillName } from "./templates";
 
-export const MODE_LABEL: Record<SkillMode, string> = { off: "Off", onDemand: "On demand", always: "Always" };
+const MODE_LABEL: Record<SkillMode, string> = { off: "Off", onDemand: "On demand", always: "Always" };
 
 export function ModeBadge({ mode }: { mode: SkillMode }) {
   if (mode === "always") return <Badge tone="purple">Always</Badge>;
@@ -31,7 +31,8 @@ export function ModeBadge({ mode }: { mode: SkillMode }) {
   return <Badge>Off</Badge>;
 }
 
-export function modeExplanation(mode: SkillMode, tokens: number): ReactNode {
+/** One or two sentences on what the mode costs. */
+export function ModeExplanation({ mode, tokens }: { mode: SkillMode; tokens: number }) {
   if (mode === "onDemand")
     return (
       <>
@@ -50,7 +51,7 @@ export function modeExplanation(mode: SkillMode, tokens: number): ReactNode {
 }
 
 /** Three cards: On demand (recommended), Always, Off. */
-export function ModeChoice(props: { value: SkillMode; onChange: (m: SkillMode) => void; tokens: number }) {
+function ModeChoice(props: { value: SkillMode; onChange: (m: SkillMode) => void; tokens: number }) {
   return (
     <div className="ext-choices" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
       <ChoiceCard
@@ -77,7 +78,7 @@ export function ModeChoice(props: { value: SkillMode; onChange: (m: SkillMode) =
 }
 
 /** Markdown textarea with a live preview and a token estimate. */
-export function BodyEditor(props: { value: string; onChange: (v: string) => void; autoFocus?: boolean }) {
+function BodyEditor(props: { value: string; onChange: (v: string) => void; autoFocus?: boolean }) {
   const tokens = estimateTokens(props.value);
   return (
     <div className="stack" style={{ gap: 8 }}>
@@ -86,11 +87,17 @@ export function BodyEditor(props: { value: string; onChange: (v: string) => void
           className="ext-mono-area"
           autoFocus={props.autoFocus}
           value={props.value}
-          placeholder={"# My skill\n\nWrite clear rules here, for example:\n- Use short sentences.\n- End with a summary."}
+          placeholder={
+            "# My skill\n\nWrite clear rules here, for example:\n- Use short sentences.\n- End with a summary."
+          }
           onChange={(e) => props.onChange(e.target.value)}
         />
         <div className="ext-preview">
-          {props.value.trim() ? <Markdown text={props.value} /> : <div className="small muted">The preview shows here.</div>}
+          {props.value.trim() ? (
+            <Markdown text={props.value} />
+          ) : (
+            <div className="small muted">The preview shows here.</div>
+          )}
         </div>
       </div>
       <div className="row xsmall">
@@ -102,8 +109,8 @@ export function BodyEditor(props: { value: string; onChange: (v: string) => void
       </div>
       {tokens > LARGE_SKILL_TOKENS && (
         <Callout tone="warning">
-          This skill is long (about {formatNumber(tokens)} tokens). The on-device model has a small context, so a long skill
-          leaves little room for the chat. Keep it short, or use it only On demand.
+          This skill is long (about {formatNumber(tokens)} tokens). The on-device model has a small context, so a long
+          skill leaves little room for the chat. Keep it short, or use it only On demand.
         </Callout>
       )}
     </div>
@@ -197,7 +204,11 @@ export function SkillEditorModal(props: {
       onClose={props.onClose}
       footer={
         <>
-          {invalid && <span className="xsmall" style={{ color: "var(--red)" }}>{invalid}</span>}
+          {invalid && (
+            <span className="xsmall" style={{ color: "var(--red)" }}>
+              {invalid}
+            </span>
+          )}
           <div className="spacer" />
           <Button onClick={props.onClose}>Cancel</Button>
           <Button variant="primary" loading={saving} disabled={!!invalid} onClick={save}>
@@ -207,7 +218,13 @@ export function SkillEditorModal(props: {
       }
     >
       <div className="stack" style={{ gap: 14 }}>
-        <NameFields name={name} description={description} taken={props.takenNames} onName={setName} onDescription={setDescription} />
+        <NameFields
+          name={name}
+          description={description}
+          taken={props.takenNames}
+          onName={setName}
+          onDescription={setDescription}
+        />
         <div className="ext-block">
           <div className="ext-block__label">Instructions</div>
           <BodyEditor value={body} onChange={setBody} />
@@ -285,8 +302,9 @@ export function SkillWizard(props: { takenNames: string[]; onClose: () => void; 
     content = (
       <div className="stack" style={{ gap: 16 }}>
         <Callout>
-          <b>What is a skill?</b> A skill is a set of instructions saved as a <span className="mono">SKILL.md</span> file,
-          like Claude Skills. It teaches the model how to do one kind of task, for example how you like your emails written.
+          <b>What is a skill?</b> A skill is a set of instructions saved as a <span className="mono">SKILL.md</span>{" "}
+          file, like Claude Skills. It teaches the model how to do one kind of task, for example how you like your
+          emails written.
         </Callout>
         <div className="ext-h" style={{ margin: 0 }}>
           Start from a template
@@ -295,7 +313,11 @@ export function SkillWizard(props: { takenNames: string[]; onClose: () => void; 
           {SKILL_TEMPLATES.map((t) => (
             <ChoiceCard
               key={t.id}
-              icon={<Tile tone="orange"><Sparkles size={15} /></Tile>}
+              icon={
+                <Tile tone="orange">
+                  <Sparkles size={15} />
+                </Tile>
+              }
               title={t.title}
               description={t.summary}
               selected={start === t.id}
@@ -303,7 +325,11 @@ export function SkillWizard(props: { takenNames: string[]; onClose: () => void; 
             />
           ))}
           <ChoiceCard
-            icon={<Tile tone="gray"><Sparkles size={15} /></Tile>}
+            icon={
+              <Tile tone="gray">
+                <Sparkles size={15} />
+              </Tile>
+            }
             title="Blank skill"
             description="Write your own from scratch."
             selected={start === "blank"}
@@ -315,10 +341,17 @@ export function SkillWizard(props: { takenNames: string[]; onClose: () => void; 
   } else if (step === 1) {
     content = (
       <div className="stack" style={{ gap: 14 }}>
-        <NameFields autoFocus name={name} description={description} taken={props.takenNames} onName={setName} onDescription={setDescription} />
+        <NameFields
+          autoFocus
+          name={name}
+          description={description}
+          taken={props.takenNames}
+          onName={setName}
+          onDescription={setDescription}
+        />
         <Callout>
-          A good description says <b>when</b> to use the skill. Example: <i>"Use when the user pastes meeting notes. Turns
-          them into a summary and action items."</i>
+          A good description says <b>when</b> to use the skill. Example:{" "}
+          <i>"Use when the user pastes meeting notes. Turns them into a summary and action items."</i>
         </Callout>
       </div>
     );
@@ -336,7 +369,9 @@ export function SkillWizard(props: { takenNames: string[]; onClose: () => void; 
       <div className="stack" style={{ gap: 14 }}>
         <div className="small muted">How should the model use this skill? You can change this later.</div>
         <ModeChoice value={mode} onChange={setMode} tokens={tokens} />
-        <div className="small">{modeExplanation(mode, tokens)}</div>
+        <div className="small">
+          <ModeExplanation mode={mode} tokens={tokens} />
+        </div>
       </div>
     );
   } else {
@@ -372,7 +407,11 @@ export function SkillWizard(props: { takenNames: string[]; onClose: () => void; 
         <>
           <Button onClick={props.onClose}>Cancel</Button>
           <div className="spacer" />
-          {stepError && step > 0 && <span className="xsmall" style={{ color: "var(--red)" }}>{stepError}</span>}
+          {stepError && step > 0 && (
+            <span className="xsmall" style={{ color: "var(--red)" }}>
+              {stepError}
+            </span>
+          )}
           {step > 0 && <Button onClick={() => setStep(step - 1)}>Back</Button>}
           {step < WIZARD_STEPS.length - 1 ? (
             <Button variant="primary" disabled={!!stepError} onClick={() => setStep(step + 1)}>
@@ -456,8 +495,8 @@ export function SkillImportModal(props: { onClose: () => void; onImported: (skil
     >
       <div className="stack" style={{ gap: 12 }}>
         <div className="small muted">
-          fmGUI found these skills on your Mac, for example in <span className="mono">~/.claude/skills</span>. Importing copies
-          the folder into fmGUI. The original stays where it is.
+          fmGUI found these skills on your Mac, for example in <span className="mono">~/.claude/skills</span>. Importing
+          copies the folder into fmGUI. The original stays where it is.
         </div>
         {error && <Callout tone="error">Could not look for skills: {error}</Callout>}
         {list === null ? (

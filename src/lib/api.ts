@@ -1,4 +1,4 @@
-// CONTRACT FILE (owned by the lead). Typed wrappers for every Tauri command.
+// Typed wrappers for every Tauri command.
 // Command names and argument keys must match src-tauri/src/lib.rs.
 // Tauri converts camelCase argument keys to the Rust snake_case parameters.
 
@@ -53,11 +53,9 @@ export const getConfig = () => invoke<AppConfig>("get_config");
 export const saveConfig = (config: AppConfig) => invoke<AppConfig>("save_config", { config });
 export const getPaths = () => invoke<PathsInfo>("get_paths");
 export const readTextFile = (path: string) => invoke<string>("read_text_file", { path });
-export const writeTextFile = (path: string, content: string) =>
-  invoke<void>("write_text_file", { path, content });
+export const writeTextFile = (path: string, content: string) => invoke<void>("write_text_file", { path, content });
 /** data: base64 or a data URL. Returns the absolute path. */
-export const saveTempFile = (fileName: string, data: string) =>
-  invoke<string>("save_temp_file", { fileName, data });
+export const saveTempFile = (fileName: string, data: string) => invoke<string>("save_temp_file", { fileName, data });
 export const saveTempText = (fileName: string, content: string) =>
   invoke<string>("save_temp_text", { fileName, content });
 export const readImageDataUrl = (path: string) => invoke<string>("read_image_data_url", { path });
@@ -77,8 +75,7 @@ export const openInTerminal = (command: string) => invoke<void>("open_in_termina
 export const cliSessionsList = () => invoke<CliSession[]>("cli_sessions_list");
 export const cliSessionRead = (name: string) => invoke<ParsedTranscript>("cli_session_read", { name });
 export const cliSessionDelete = (name: string) => invoke<void>("cli_session_delete", { name });
-export const cliSessionRename = (from: string, to: string) =>
-  invoke<void>("cli_session_rename", { from, to });
+export const cliSessionRename = (from: string, to: string) => invoke<void>("cli_session_rename", { from, to });
 export const cliSessionNewPath = (base: string) => invoke<string>("cli_session_new_path", { base });
 export const transcriptRead = (path: string) => invoke<ParsedTranscript>("transcript_read", { path });
 
@@ -104,12 +101,7 @@ export const chatDelete = (id: string) => invoke<void>("chat_delete", { id });
 export const chatRename = (id: string, title: string) => invoke<Chat>("chat_rename", { id, title });
 export const chatSetInstructions = (id: string, instructions: string) =>
   invoke<Chat>("chat_set_instructions", { id, instructions });
-export function chatSend(
-  chatId: string,
-  text: string,
-  images: string[],
-  onEvent: (e: AgentEvent) => void,
-) {
+export function chatSend(chatId: string, text: string, images: string[], onEvent: (e: AgentEvent) => void) {
   const channel = new Channel<AgentEvent>();
   channel.onmessage = onEvent;
   return invoke<ChatMessage>("chat_send", { chatId, text, images, onEvent: channel });

@@ -1,13 +1,15 @@
 // One tool call inside an assistant turn: a compact card that expands to show
-// arguments and result, with an inline approval panel. OWNER: agent "ui-chat".
+// arguments and result, with an inline approval panel.
 
 import { Ban, Check, ChevronRight, Hammer, Hand, Plug, Sparkles, TriangleAlert, Wrench, X } from "lucide-react";
 import { memo, useState } from "react";
-import { Button, CodeBlock, Spinner, cx, formatDuration } from "../../components/ui";
+import { Button, CodeBlock, Spinner } from "../../components/ui";
+import { cx } from "../../lib/cx";
+import { formatDuration, prettyJson, tryPrettyJson } from "../../lib/format";
 import type { AgentStep, ApprovalDecision, ToolSource } from "../../lib/types";
-import { isEmptyArgs, prettyJson } from "./utils";
+import { isEmptyArgs } from "./utils";
 
-export const SOURCE_LABEL: Record<ToolSource, string> = {
+const SOURCE_LABEL: Record<ToolSource, string> = {
   builtin: "Built-in",
   custom: "Custom",
   mcp: "MCP",
@@ -39,10 +41,8 @@ function StatusIcon(props: { status: AgentStep["status"] }) {
   }
 }
 
-function formatResult(text: string): string {
-  const t = text.trim();
-  return t.startsWith("{") || t.startsWith("[") ? prettyJson(t) : text;
-}
+/** Tool results are often JSON; show them indented. */
+const formatResult = (text: string) => tryPrettyJson(text) ?? text;
 
 export const StepCard = memo(function StepCard(props: {
   step: AgentStep;
@@ -65,7 +65,13 @@ export const StepCard = memo(function StepCard(props: {
   }
 
   const statusText =
-    step.status === "denied" ? "Denied" : step.status === "error" ? "Failed" : step.status === "pendingApproval" ? "Waiting" : "";
+    step.status === "denied"
+      ? "Denied"
+      : step.status === "error"
+        ? "Failed"
+        : step.status === "pendingApproval"
+          ? "Waiting"
+          : "";
 
   return (
     <div
@@ -85,9 +91,7 @@ export const StepCard = memo(function StepCard(props: {
       >
         <SourceIcon source={step.source} />
         <span className="cv-step__title truncate">{step.title || step.toolName}</span>
-        {step.title && step.title !== step.toolName && (
-          <span className="cv-step__name truncate">{step.toolName}</span>
-        )}
+        {step.title && step.title !== step.toolName && <span className="cv-step__name truncate">{step.toolName}</span>}
         <span className="spacer" />
         {statusText && <span className="cv-step__state">{statusText}</span>}
         {step.durationMs != null && <span className="cv-step__dur">{formatDuration(step.durationMs)}</span>}

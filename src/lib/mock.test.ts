@@ -20,11 +20,22 @@ import type { AgentEvent, LogLine, McpServerStatus, RunEvent } from "./types";
 describe("schema object builder", () => {
   it("matches the shape fm prints for flat properties", () => {
     const r = schemaFromObjectArgs([
-      "schema", "object", "--name", "Person",
-      "--string", "name", "--description", "Full name",
-      "--integer", "age", "--optional",
-      "--string", "tags", "--array",
-      "--boolean", "active",
+      "schema",
+      "object",
+      "--name",
+      "Person",
+      "--string",
+      "name",
+      "--description",
+      "Full name",
+      "--integer",
+      "age",
+      "--optional",
+      "--string",
+      "tags",
+      "--array",
+      "--boolean",
+      "active",
     ]);
     if ("error" in r) throw new Error(r.error);
     expect(r.schema).toEqual({
@@ -44,15 +55,29 @@ describe("schema object builder", () => {
 
   it("puts nested objects in $defs, after plain values (like fm 27.0.1)", () => {
     const r = schemaFromObjectArgs([
-      "schema", "object", "--name", "Trip",
-      "--string", "city",
-      "--double", "budget", "--description", "Budget in USD",
-      "--string", "address.street",
-      "--integer", "address.number", "--optional",
-      "--boolean", "flags", "--array",
+      "schema",
+      "object",
+      "--name",
+      "Trip",
+      "--string",
+      "city",
+      "--double",
+      "budget",
+      "--description",
+      "Budget in USD",
+      "--string",
+      "address.street",
+      "--integer",
+      "address.number",
+      "--optional",
+      "--boolean",
+      "flags",
+      "--array",
     ]);
     if ("error" in r) throw new Error(r.error);
-    const s = r.schema as Record<string, any>;
+    // A loose shape, so the test can reach into nested schema parts.
+    type Loose = { [key: string]: Loose } & unknown[];
+    const s = r.schema as Loose;
     expect(s["x-order"]).toEqual(["city", "budget", "flags", "address"]);
     expect(s.required).toEqual(["city", "budget", "flags", "address"]);
     expect(s.properties.address).toEqual({ $ref: "#/$defs/Address" });
@@ -111,7 +136,9 @@ describe("streaming and parsing helpers", () => {
 
   it("counts tokens like fm for plain text and copies the image bug", () => {
     // Real `fm count-tokens --quiet` says 9 for this sentence.
-    expect(countTokensFromArgs(["count-tokens", "--quiet", "--", "Hello there, how are you today?"], () => undefined)).toEqual({
+    expect(
+      countTokensFromArgs(["count-tokens", "--quiet", "--", "Hello there, how are you today?"], () => undefined),
+    ).toEqual({
       tokens: 9,
     });
     const img = countTokensFromArgs(["count-tokens", "--image", "/a.png", "--", "hi"], () => undefined);
@@ -169,7 +196,10 @@ describe("mock backend through the real api.ts", () => {
   it("runs count-tokens, schema object and available", async () => {
     const count = await api.fmRun(["count-tokens", "--quiet", "--", "Hello there, how are you today?"], () => {});
     expect(count.stdout.trim()).toBe("9");
-    const schema = await api.fmRun(["schema", "object", "--name", "Dog", "--string", "breed", "--boolean", "friendly"], () => {});
+    const schema = await api.fmRun(
+      ["schema", "object", "--name", "Dog", "--string", "breed", "--boolean", "friendly"],
+      () => {},
+    );
     expect(JSON.parse(schema.stdout).title).toBe("Dog");
     expect(schema.stdout).toContain('"title" : "Dog"');
     expect((await api.fmRun(["available"], () => {})).stdout).toBe("System model available\n");
@@ -249,7 +279,9 @@ describe("mock backend through the real api.ts", () => {
     const missing = await api.publicServerRequest("GET", "/nope");
     expect(missing.status).toBe(404);
     expect(lines.some((l) => l.line.includes("listening on http://127.0.0.1:1976"))).toBe(true);
-    expect(lines.some((l) => / · \[POST\] · \/v1\/chat\/completions · 200 · system · \d+→\d+ tokens · \d+ms$/.test(l.line))).toBe(true);
+    expect(
+      lines.some((l) => / · \[POST\] · \/v1\/chat\/completions · 200 · system · \d+→\d+ tokens · \d+ms$/.test(l.line)),
+    ).toBe(true);
     expect((await api.publicServerStop()).running).toBe(false);
     unlisten();
   });

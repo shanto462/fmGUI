@@ -1,11 +1,13 @@
 // Shared building blocks for the "workbench" pages (Playground, Schema Builder,
 // Token Counter, API Server, Docs): a two-pane layout with an inspector on the
-// left and output on the right, plus small helpers. OWNER: agent "ui-build".
+// left and output on the right.
 
-import { open, save } from "@tauri-apps/plugin-dialog";
 import { ChevronDown, ChevronRight, X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
-import { Button, IconButton, cx } from "../../components/ui";
+import { useState, type ReactNode } from "react";
+import { Button, IconButton } from "../../components/ui";
+import { cx } from "../../lib/cx";
+import { tildePath } from "../../lib/paths";
+import { useApp } from "../../lib/store";
 import "./workbench.css";
 
 // ---------- Layout ----------
@@ -61,7 +63,7 @@ export function InspectorRow(props: { label: ReactNode; hint?: ReactNode; childr
   );
 }
 
-/** Shows a chosen path with Choose… and Clear buttons. */
+/** Shows a chosen path (home folder as "~") with Choose… and Clear buttons. */
 export function FileField(props: {
   path: string;
   placeholder: string;
@@ -69,10 +71,14 @@ export function FileField(props: {
   onClear: () => void;
   chooseLabel?: string;
 }) {
+  const home = useApp((s) => s.paths?.homeDir);
+  const shown = props.path ? tildePath(props.path, home) : "";
   return (
-    <div className="wb-file" title={props.path || undefined}>
+    <div className="wb-file" title={shown || undefined}>
       <span className={cx("wb-file__name", !props.path && "wb-file__name--empty")}>
-        {props.path ? `‎${props.path}` : props.placeholder}
+        {/* The box is right-to-left, so a long path is cut at the start and the file name stays in view.
+            The left-to-right mark keeps "~" and "/" in the right order. */}
+        {shown ? `\u200e${shown}` : props.placeholder}
       </span>
       {props.path && (
         <IconButton label="Clear" onClick={props.onClear} style={{ width: 22, height: 22 }}>
@@ -97,129 +103,4 @@ export function Stat(props: { label: string; value: ReactNode; tone?: "red" | "g
       {props.label} <strong>{props.value}</strong>
     </span>
   );
-}
-
-// ---------- Hooks ----------
-
-export function useDebouncedValue<T>(value: T, ms: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return debounced;
-}
-
-/** Re-renders every `ms` while `active` is true (live timers). */
-export function useTicker(active: boolean, ms = 250): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [active, ms]);
-  return now;
-}
-
-// ---------- File dialogs ----------
-
-export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "heic", "heif", "gif", "webp", "tif", "tiff", "bmp"];
-
-/** Native open panel for one file. Returns null when the user cancels. */
-export async function pickFile(opts: { title?: string; name?: string; extensions?: string[] } = {}): Promise<string | null> {
-  const result = await open({
-    title: opts.title,
-    multiple: false,
-    directory: false,
-    filters: opts.extensions ? [{ name: opts.name ?? "Files", extensions: opts.extensions }] : undefined,
-  });
-  return typeof result === "string" ? result : null;
-}
-
-/** Native open panel for many files. Returns [] when the user cancels. */
-export async function pickFiles(opts: { title?: string; name?: string; extensions?: string[] } = {}): Promise<string[]> {
-  const result = await open({
-    title: opts.title,
-    multiple: true,
-    directory: false,
-    filters: opts.extensions ? [{ name: opts.name ?? "Files", extensions: opts.extensions }] : undefined,
-  });
-  if (!result) return [];
-  return Array.isArray(result) ? result : [result];
-}
-
-/** Native save panel. Returns null when the user cancels. */
-export async function pickSavePath(opts: { title?: string; defaultPath?: string; name?: string; extensions?: string[] }) {
-  const result = await save({
-    title: opts.title,
-    defaultPath: opts.defaultPath,
-    filters: opts.extensions ? [{ name: opts.name ?? "Files", extensions: opts.extensions }] : undefined,
-  });
-  return result ?? null;
-}
-
-// ---------- Text helpers ----------
-
-const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
-
-/** The backend strips ANSI already; this is a cheap second guard for display. */
-export function stripAnsi(text: string): string {
-  return text.replace(ANSI_RE, "");
-}
-
-/** Pretty JSON text, or null when `text` is not JSON. */
-export function tryPrettyJson(text: string): string | null {
-  const t = text.trim();
-  if (!t || (t[0] !== "{" && t[0] !== "[")) return null;
-  try {
-    return JSON.stringify(JSON.parse(t), null, 2);
-  } catch {
-    return null;
-  }
-}
-
-/** Parse error message for JSON text, or null when it parses. */
-export function jsonError(text: string): string | null {
-  try {
-    JSON.parse(text);
-    return null;
-  } catch (err) {
-    return err instanceof Error ? err.message : String(err);
-  }
-}
-
-export function baseName(path: string): string {
-  const parts = path.split("/");
-  return parts[parts.length - 1] || path;
-}
-
-/** Short stable hash (FNV-1a, 32 bit) for temp file names. */
-export function hashText(text: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, "0");
-}
-
-export function joinPath(dir: string, name: string): string {
-  return dir.endsWith("/") ? dir + name : `${dir}/${name}`;
-}
-
-export function truncateText(text: string, max: number): string {
-  const t = text.replace(/\s+/g, " ").trim();
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
-}
-
-/** "1m 05s" style uptime. */
-export function formatUptime(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
-  if (m > 0) return `${m}m ${String(sec).padStart(2, "0")}s`;
-  return `${sec}s`;
 }

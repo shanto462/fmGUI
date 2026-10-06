@@ -1,7 +1,7 @@
-// Hooks shared by Chat and CLI Sessions. OWNER: agent "ui-chat".
+// Hooks shared by Chat and CLI Sessions.
 
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { isImagePath } from "./utils";
 
 /**
@@ -13,6 +13,13 @@ export function useAutoScroll(resetKey: string | null) {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const stick = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
+  const [lastKey, setLastKey] = useState(resetKey);
+
+  // A new chat or session starts at the bottom.
+  if (lastKey !== resetKey) {
+    setLastKey(resetKey);
+    setAtBottom(true);
+  }
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -31,7 +38,6 @@ export function useAutoScroll(resetKey: string | null) {
 
   useLayoutEffect(() => {
     stick.current = true;
-    setAtBottom(true);
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [resetKey]);
@@ -58,8 +64,7 @@ export function useAutoScroll(resetKey: string | null) {
  */
 export function useImageFileDrop(onPaths: (paths: string[]) => void, enabled = true): boolean {
   const [over, setOver] = useState(false);
-  const cb = useRef(onPaths);
-  cb.current = onPaths;
+  const onDrop = useEffectEvent((paths: string[]) => onPaths(paths));
 
   useEffect(() => {
     if (!enabled) return;
@@ -73,7 +78,7 @@ export function useImageFileDrop(onPaths: (paths: string[]) => void, enabled = t
         else if (p.type === "drop") {
           setOver(false);
           const images = p.paths.filter(isImagePath);
-          if (images.length) cb.current(images);
+          if (images.length) onDrop(images);
         }
       })
       .then((fn) => {

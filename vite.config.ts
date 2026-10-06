@@ -8,8 +8,12 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => ({
   plugins: [react()],
 
-  // macOS 27 only: its WebKit supports modern JS (top-level await, etc.).
-  build: { target: "safari18" },
+  build: {
+    // macOS 27 only: its WebKit supports modern JS (top-level await, etc.).
+    target: "safari18",
+    // The app loads its one bundle from disk, so a large chunk costs nothing.
+    chunkSizeWarningLimit: 1024,
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

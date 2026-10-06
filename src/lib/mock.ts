@@ -1,8 +1,8 @@
 // Browser "mock mode": a fake Tauri backend so the UI runs in a normal browser
 // with realistic data. Open http://localhost:1420/?mock=1 after `npm run dev`.
-// Scenarios: ?mock=1 (ready), ?mock=nolicense, ?mock=nofm, ?mock=setup (fresh install).
-// OWNER: agent "ui-mock". Nothing here runs in the real app.
-//
+// Scenarios: ?mock=1 (ready), ?mock=nolicense (opens on the License step),
+// ?mock=nofm, ?mock=setup (fresh install: every check passes, so setup completes on its own).
+// Nothing here runs in the real app.
 // How it works: `mockIPC` from @tauri-apps/api/mocks installs a fake
 // `window.__TAURI_INTERNALS__` (so `isTauri()` is true) and sends every
 // `invoke()` to `MockBackend.handle`. Channels (`fm_run`, `chat_send`) arrive as
@@ -81,7 +81,7 @@ function wire<T>(value: T): T {
  * Sends messages to a `Channel` passed as an invoke argument. Uses the
  * channel's callback id (like Rust does) and falls back to `onmessage`.
  */
-export function channelSender<T>(channel: unknown) {
+function channelSender<T>(channel: unknown) {
   const ch = channel as { id?: number; onmessage?: (m: T) => void } | undefined;
   let index = 0;
   const target = () => {
@@ -107,7 +107,7 @@ export function channelSender<T>(channel: unknown) {
 let pngCache: string | null = null;
 
 /** A small generated PNG data URL (canvas in the browser, 1x1 PNG elsewhere). */
-export function samplePng(): string {
+function samplePng(): string {
   if (pngCache) return pngCache;
   try {
     if (typeof document !== "undefined") {
@@ -152,16 +152,24 @@ const humanize = (name: string) => {
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
 
-const toolSlug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+const toolSlug = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 
 function titleFrom(text: string): string {
-  const words = text.replace(/https?:\/\/\S+/g, "").trim().split(/\s+/).slice(0, 6).join(" ");
+  const words = text
+    .replace(/https?:\/\/\S+/g, "")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 6)
+    .join(" ");
   const t = words.replace(/[?.!,:;]+$/, "");
   return t ? (t.length > 40 ? `${t.slice(0, 39)}…` : t) : "New chat";
 }
 
-const nowText = () =>
-  new Date().toLocaleString("en-GB", { dateStyle: "full", timeStyle: "long" }).replace(",", "");
+const nowText = () => new Date().toLocaleString("en-GB", { dateStyle: "full", timeStyle: "long" }).replace(",", "");
 
 interface DialogFilter {
   name: string;
@@ -409,9 +417,7 @@ export class MockBackend {
         await this.sleep(40);
         // Unknown files get a sample transcript so any picked file works.
         return (
-          this.transcriptAt(a.path ?? "") ??
-          this.sessions[0]?.transcript ??
-          fail("This file is not an fm transcript.")
+          this.transcriptAt(a.path ?? "") ?? this.sessions[0]?.transcript ?? fail("This file is not an fm transcript.")
         );
       case "public_server_start":
         return this.serverStart(a.config as PublicServerConfig);
@@ -601,7 +607,8 @@ export class MockBackend {
     const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
     const mime = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : `image/${ext || "png"}`;
     if (data.startsWith("data:")) this.images.set(path, data);
-    else if (["png", "jpg", "jpeg", "gif", "webp", "heic"].includes(ext)) this.images.set(path, `data:${mime};base64,${data}`);
+    else if (["png", "jpg", "jpeg", "gif", "webp", "heic"].includes(ext))
+      this.images.set(path, `data:${mime};base64,${data}`);
     else this.files.set(path, data);
     return path;
   }
@@ -685,7 +692,10 @@ export class MockBackend {
 
     if (sub === "respond") {
       if (!this.licenseAgreed) {
-        return failRun(69, "You need to agree to the Foundation Models license first. Run sudo fm license in Terminal.");
+        return failRun(
+          69,
+          "You need to agree to the Foundation Models license first. Run sudo fm license in Terminal.",
+        );
       }
       const p = D.parseRespondArgs(args);
       if (!p.prompt.trim() && !p.texts.length && !p.images.length) {
@@ -719,7 +729,8 @@ export class MockBackend {
 
     if (sub === "schema") {
       await this.sleep(120);
-      if (args[1] !== "object") return failRun(64, "Missing subcommand. Use: fm schema object --name Person --string name");
+      if (args[1] !== "object")
+        return failRun(64, "Missing subcommand. Use: fm schema object --name Person --string name");
       const r = D.schemaFromObjectArgs(args);
       if ("error" in r) return failRun(64, r.error);
       write(`${D.formatLikeFm(r.schema)}\n`);
@@ -771,9 +782,19 @@ export class MockBackend {
     const base = p.resume ? this.transcriptAt(p.resume) : undefined;
     const t: ParsedTranscript = base
       ? wire(base)
-      : { modelName: "system", instructions: p.instructions, messages: [], systemVersion: "Version 27.0.1 (Build 26A434)" };
+      : {
+          modelName: "system",
+          instructions: p.instructions,
+          messages: [],
+          systemVersion: "Version 27.0.1 (Build 26A434)",
+        };
     t.messages.push(
-      { id: D.uid(), role: "user", text: [p.prompt, ...p.texts].filter(Boolean).join("\n"), images: p.images.map(() => samplePng()) },
+      {
+        id: D.uid(),
+        role: "user",
+        text: [p.prompt, ...p.texts].filter(Boolean).join("\n"),
+        images: p.images.map(() => samplePng()),
+      },
       { id: D.uid(), role: "response", text: answer, images: [] },
     );
     const prefix = `${D.SESSIONS_DIR}/`;
@@ -901,7 +922,7 @@ export class MockBackend {
         data: [{ id: "system", object: "model", owned_by: "Apple", created }],
       });
     } else if (m === "POST" && path === "/v1/chat/completions") {
-      let req: Record<string, unknown> | null = null;
+      let req: Record<string, unknown> | null;
       try {
         req = JSON.parse(body ?? "") as Record<string, unknown>;
       } catch {
@@ -942,7 +963,9 @@ export class MockBackend {
             object: "chat.completion",
             model: "system",
             created,
-            choices: [{ index: 0, message: { role: "assistant", content: answer, refusal: null }, finish_reason: "stop" }],
+            choices: [
+              { index: 0, message: { role: "assistant", content: answer, refusal: null }, finish_reason: "stop" },
+            ],
           });
         } else {
           const chunk = (choice: unknown) =>
@@ -1077,7 +1100,12 @@ export class MockBackend {
     const notes: string[] = [];
     const skillsUsed = [...this.skills.keys()].filter((n) => this.skillMode(n) === "always");
     const toolsOn = this.config.chatDefaults.toolsEnabled;
-    const newStep = (toolName: string, title: string, args: unknown, source: AgentStep["source"] = "builtin"): AgentStep => {
+    const newStep = (
+      toolName: string,
+      title: string,
+      args: unknown,
+      source: AgentStep["source"] = "builtin",
+    ): AgentStep => {
       const s: AgentStep = {
         id: D.uid(),
         toolId: source === "skill" ? "skill:use_skill" : `builtin:${toolName}`,
@@ -1121,7 +1149,12 @@ export class MockBackend {
     }
 
     // Date and time.
-    if (toolsOn && !run.cancelled && /\b(time|date|today|day|clock|now)\b/i.test(text) && this.toolOn("get_current_datetime")) {
+    if (
+      toolsOn &&
+      !run.cancelled &&
+      /\b(time|date|today|day|clock|now)\b/i.test(text) &&
+      this.toolOn("get_current_datetime")
+    ) {
       const s = newStep("get_current_datetime", "Current date and time", {});
       await runStep(s, 150, nowText);
       notes.push(`It is now **${s.result}**.`);
@@ -1162,7 +1195,13 @@ export class MockBackend {
     }
 
     // On-demand skill.
-    if (toolsOn && !run.cancelled && /\be-?mail\b/i.test(text) && this.skills.has("email-writer") && this.skillMode("email-writer") === "onDemand") {
+    if (
+      toolsOn &&
+      !run.cancelled &&
+      /\be-?mail\b/i.test(text) &&
+      this.skills.has("email-writer") &&
+      this.skillMode("email-writer") === "onDemand"
+    ) {
       const s = newStep("use_skill", "Use skill: email-writer", { name: "email-writer" }, "skill");
       out.send({ type: "status", text: "Loading skill email-writer" });
       const tokens = this.skills.get("email-writer")!.tokenEstimate;
@@ -1193,7 +1232,10 @@ export class MockBackend {
     const contextSize = this.config.contextSize;
     out.send({
       type: "context",
-      usedTokens: Math.min(contextSize - 120, priorTurns === 0 && steps.length === 0 ? 1450 : promptTokens + completionTokens),
+      usedTokens: Math.min(
+        contextSize - 120,
+        priorTurns === 0 && steps.length === 0 ? 1450 : promptTokens + completionTokens,
+      ),
       contextSize,
     });
 
@@ -1212,6 +1254,8 @@ export class MockBackend {
     chat.messages.push(message);
     chat.updatedAt = message.createdAt;
     this.chatRuns.delete(chatId);
+    // Like the Rust engine: a failed turn sends "error", then "done" with the error on the message.
+    if (message.error) out.send({ type: "error", message: message.error });
     out.send({ type: "done", message });
     out.end();
     return message;
@@ -1332,21 +1376,28 @@ export class MockBackend {
           return D.FETCHED_PAGE;
         case "spotlight_search": {
           const q = D.slugify(str("query", "notes"));
-          return [`${D.HOME}/Documents/${q}.md`, `${D.HOME}/Documents/Projects/${q}-plan.pdf`, `${D.HOME}/Downloads/${q}-2026.txt`].join("\n");
+          return [
+            `${D.HOME}/Documents/${q}.md`,
+            `${D.HOME}/Documents/Projects/${q}-plan.pdf`,
+            `${D.HOME}/Downloads/${q}-2026.txt`,
+          ].join("\n");
         }
         case "read_file": {
           const path = str("path");
-          if (!this.insideAllowed(path)) throw new Error("This path is outside the allowed folders. Add the folder in Settings first.");
+          if (!this.insideAllowed(path))
+            throw new Error("This path is outside the allowed folders. Add the folder in Settings first.");
           return this.files.get(path) ?? "Hello from a sample file.\nThis text is fake mock data.\n";
         }
         case "list_directory": {
           const path = str("path", this.config.allowedFolders[0] ?? D.HOME);
-          if (!this.insideAllowed(path)) throw new Error("This path is outside the allowed folders. Add the folder in Settings first.");
+          if (!this.insideAllowed(path))
+            throw new Error("This path is outside the allowed folders. Add the folder in Settings first.");
           return "Projects/\nReceipts/\nnotes.txt\nperson-schema.json";
         }
         case "write_file": {
           const path = str("path");
-          if (!this.insideAllowed(path)) throw new Error("This path is outside the allowed folders. Add the folder in Settings first.");
+          if (!this.insideAllowed(path))
+            throw new Error("This path is outside the allowed folders. Add the folder in Settings first.");
           this.files.set(path, str("content"));
           return `Wrote ${str("content").length} bytes to ${path}.`;
         }
@@ -1467,7 +1518,14 @@ export class MockBackend {
 
   private async mcpConnect(id: string): Promise<McpServerStatus[]> {
     if (!this.config.mcpServers.some((s) => s.id === id)) fail("No MCP server with this id.");
-    this.mcp.set(id, { state: "connecting", error: null, serverName: null, serverVersion: null, tools: [], stderrTail: [] });
+    this.mcp.set(id, {
+      state: "connecting",
+      error: null,
+      serverName: null,
+      serverVersion: null,
+      tools: [],
+      stderrTail: [],
+    });
     this.emit("mcp-status", this.mcpStatuses());
     await this.sleep(900);
     this.mcp.set(id, this.connectedRuntime(id));
@@ -1522,7 +1580,8 @@ export class MockBackend {
   private async skillSave(input: SkillInput): Promise<Skill> {
     await this.sleep(120);
     const name = (input?.name ?? "").trim();
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) fail("Use lowercase letters, numbers and dashes for the name, like email-writer.");
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name))
+      fail("Use lowercase letters, numbers and dashes for the name, like email-writer.");
     if (!input.description.trim()) fail("Add a short description. The model uses it to pick the skill.");
     const original = input.originalName ?? null;
     if (original && original !== name) {
@@ -1532,7 +1591,10 @@ export class MockBackend {
       fail(`A skill named ${name} already exists.`);
     }
     const prev = original ? undefined : this.skills.get(name);
-    const skill = D.makeSkill({ name, description: input.description.trim(), body: input.body, files: prev?.files }, D.PATHS.skillsDir);
+    const skill = D.makeSkill(
+      { name, description: input.description.trim(), body: input.body, files: prev?.files },
+      D.PATHS.skillsDir,
+    );
     this.skills.set(name, skill);
     return skill;
   }
@@ -1546,7 +1608,11 @@ export class MockBackend {
       const raw = this.files.get(path) ?? fail(`No SKILL.md found at ${path}.`);
       const fm = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
       const field = (k: string) => fm?.[1].match(new RegExp(`^${k}:\\s*(.+)$`, "m"))?.[1].trim() ?? "";
-      const folder = path.replace(/\/SKILL\.md$/i, "").split("/").pop() ?? "imported-skill";
+      const folder =
+        path
+          .replace(/\/SKILL\.md$/i, "")
+          .split("/")
+          .pop() ?? "imported-skill";
       seed = { name: field("name") || folder, description: field("description"), body: (fm?.[2] ?? raw).trim() };
     }
     if (this.skills.has(seed.name)) fail(`A skill named ${seed.name} already exists. Delete it first or rename it.`);
@@ -1559,15 +1625,13 @@ export class MockBackend {
 /** The JSON that `fm` writes for a transcript (for read_text_file on a session path). */
 function toFmTranscriptJson(t: ParsedTranscript): string {
   const entries: unknown[] = [];
-  if (t.instructions) entries.push({ role: "instructions", id: D.uid(), contents: [{ type: "text", text: t.instructions }] });
+  if (t.instructions)
+    entries.push({ role: "instructions", id: D.uid(), contents: [{ type: "text", text: t.instructions }] });
   for (const m of t.messages) {
     entries.push({
       role: m.role,
       id: m.id,
-      contents: [
-        { type: "text", text: m.text },
-        ...m.images.map((image) => ({ type: "image", image })),
-      ],
+      contents: [{ type: "text", text: m.text }, ...m.images.map((image) => ({ type: "image", image }))],
       ...(m.role === "response" ? { metadata: { systemVersion: t.systemVersion } } : {}),
     });
   }

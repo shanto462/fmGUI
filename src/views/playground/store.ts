@@ -1,5 +1,5 @@
 // Playground state lives outside the component so a running `fm respond`, the
-// form, and the run history survive switching pages. OWNER: agent "ui-build".
+// form, and the run history survive switching pages.
 
 import { create } from "zustand";
 import { errorMessage, fmCancel, fmRun, newId, saveTempText } from "../../lib/api";
@@ -12,8 +12,9 @@ import {
   type RespondOptions,
   type UseCase,
 } from "../../lib/fmArgs";
+import { hashText, jsonError } from "../../lib/format";
+import { joinPath } from "../../lib/paths";
 import type { RunResult } from "../../lib/types";
-import { hashText, joinPath, jsonError } from "./workbench";
 
 export type SchemaMode = "none" | "file" | "paste";
 
@@ -41,7 +42,7 @@ export interface PgForm {
   saveTranscriptPath: string;
 }
 
-export const emptyForm = (): PgForm => ({
+const emptyForm = (): PgForm => ({
   prompt: "",
   instructions: "",
   textSegments: [],
@@ -109,7 +110,7 @@ export const usePlayground = create<PgStore>((set) => ({
 const HISTORY_LIMIT = 10;
 
 /** Deterministic temp path for pasted schema JSON (save_temp_text writes `<tmpDir>/<name>`). */
-export function pastedSchemaName(text: string): string {
+function pastedSchemaName(text: string): string {
   return `schema-${hashText(text.trim())}.json`;
 }
 
@@ -117,7 +118,7 @@ export function pastedSchemaName(text: string): string {
  * Turns the form into RespondOptions. `schemaPath` is the path used for pasted
  * JSON (known before saving because the temp name is deterministic).
  */
-export function toRespondOptions(f: PgForm, tmpDir: string | null): RespondOptions {
+function toRespondOptions(f: PgForm, tmpDir: string | null): RespondOptions {
   const toolsOn = f.tools.length > 0;
   const anyLabel = toolsOn && f.images.some((i) => i.label.trim());
   let schema: string | undefined;
@@ -151,7 +152,8 @@ export function toRespondOptions(f: PgForm, tmpDir: string | null): RespondOptio
 /** validateRespond plus the checks only the GUI knows about. */
 export function formProblems(f: PgForm, tmpDir: string | null): string[] {
   const problems = validateRespond(toRespondOptions(f, tmpDir));
-  if (f.schemaMode === "file" && !f.schemaFile) problems.push("Choose a schema file, or set Structured output to None.");
+  if (f.schemaMode === "file" && !f.schemaFile)
+    problems.push("Choose a schema file, or set Structured output to None.");
   if (f.schemaMode === "paste") {
     if (!f.schemaText.trim()) problems.push("Paste a JSON schema, or set Structured output to None.");
     else {
@@ -193,7 +195,7 @@ export async function startRun(tmpDir: string | null, fmPath: string): Promise<v
     usePlayground.setState({ current: { ...cur, ...patch } });
   };
 
-  let final: PgRun = run;
+  let final: PgRun;
   try {
     // Pasted schema: write it to the temp folder so fm can read it.
     let opts = toRespondOptions(snapshot, tmpDir);

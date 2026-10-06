@@ -1,8 +1,8 @@
-// Agent chat with tools, MCP and skills. OWNER: agent "ui-chat".
+// Agent chat with tools, MCP and skills.
 // Pieces live in ./chat/: list, header, messages, step cards, composer, state.
 
 import { ArrowDown, ImagePlus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Button, Callout, Modal, Spinner } from "../components/ui";
 import {
   approvalRespond,
@@ -20,21 +20,24 @@ import {
   readImageDataUrl,
   toolsCatalog,
 } from "../lib/api";
-import { useApp } from "../lib/store";
-import type { AgentEvent, ApprovalDecision, Chat, ChatSummary, ToolInfo } from "../lib/types";
+import { pluralize } from "../lib/format";
+import { baseName } from "../lib/paths";
+import { useApp, useHandoff } from "../lib/store";
+import type { AgentEvent, ApprovalDecision, Chat, ChatMessage, ChatSummary, ToolInfo } from "../lib/types";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ChatList } from "./chat/ChatList";
 import { chatReducer, initialChatState, type ContextUse } from "./chat/chatState";
 import { Composer, type ComposerAttachment } from "./chat/Composer";
 import { useAutoScroll, useElementHeight, useImageFileDrop } from "./chat/hooks";
 import { AssistantMessage, MessageError, StatusLine, UserMessage } from "./chat/Messages";
-import { useModelReady } from "./chat/ModelReady";
 import { ToolsModal } from "./chat/ToolsModal";
-import { basename, blankMessage, imageFiles, isTempId, pickImagePaths, pluralize, readFileAsDataUrl } from "./chat/utils";
+import { useModelReady } from "./chat/useModelReady";
+import { blankMessage, imageFiles, isTempId, pickImagePaths, readFileAsDataUrl } from "./chat/utils";
 import { Welcome } from "./chat/Welcome";
 import "./chat/chat.css";
 
 const NEW_KEY = "__new";
+const NO_MESSAGES: ChatMessage[] = [];
 
 function summaryOf(chat: Chat): ChatSummary {
   const lastUser = [...chat.messages].reverse().find((m) => m.role === "user");
@@ -51,13 +54,13 @@ export default function ChatView() {
   const toast = useApp((s) => s.toast);
   const config = useApp((s) => s.config);
   const fmContextSize = useApp((s) => s.status?.contextSize);
-  const handoffChatId = useApp((s) => s.handoff.chatId);
-  const takeHandoff = useApp((s) => s.takeHandoff);
+  const handoff = useHandoff();
   const ready = useModelReady();
 
   const [list, setList] = useState<ChatSummary[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  // Another page can ask to open a chat (Overview → New chat).
+  const [activeId, setActiveId] = useState<string | null>(handoff.chatId ?? null);
   const [loadError, setLoadError] = useState<{ id: string; message: string } | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
@@ -71,64 +74,69 @@ export default function ChatView() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
 
+  // The latest state and chat id for async callbacks (send, new chat, delete).
   const stateRef = useRef(state);
-  stateRef.current = state;
   const activeIdRef = useRef(activeId);
-  activeIdRef.current = activeId;
+  useLayoutEffect(() => {
+    stateRef.current = state;
+    activeIdRef.current = activeId;
+  });
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const chat = activeId ? state.chats[activeId] ?? null : null;
+  const chat = activeId ? (state.chats[activeId] ?? null) : null;
   const run = activeId ? state.runs[activeId] : undefined;
   const running = !!run?.running;
-  const messages = chat?.messages ?? [];
+  const messages = chat?.messages ?? NO_MESSAGES;
   const loading = !!activeId && !chat && loadError?.id !== activeId;
 
   const { scrollRef, contentRef, onScroll, atBottom, scrollToBottom } = useAutoScroll(activeId);
-  const dock = useElementHeight<HTMLDivElement>();
+  const { ref: dockRef, height: dockHeight } = useElementHeight<HTMLDivElement>();
 
   // ---------- loading ----------
-  const loadList = useCallback(async () => {
-    try {
-      const chats = await chatsList();
-      setList(chats);
-      setListError(null);
-      return chats;
-    } catch (err) {
-      setListError(errorMessage(err));
-      return null;
-    }
-  }, []);
+  // Both loaders never reject: errors show in the list and in the tools sheet.
+  const loadList = useCallback(
+    () =>
+      chatsList().then(
+        (chats) => {
+          setList(chats);
+          setListError(null);
+          return chats;
+        },
+        (err) => {
+          setListError(errorMessage(err));
+          return null;
+        },
+      ),
+    [],
+  );
 
-  const loadCatalog = useCallback(async () => {
-    try {
-      setCatalog(await toolsCatalog());
-      setCatalogError(null);
-    } catch (err) {
-      setCatalogError(errorMessage(err));
-    }
-  }, []);
+  const loadCatalog = useCallback(
+    () =>
+      toolsCatalog().then(
+        (tools) => {
+          setCatalog(tools);
+          setCatalogError(null);
+        },
+        (err) => setCatalogError(errorMessage(err)),
+      ),
+    [],
+  );
 
   useEffect(() => {
-    loadList().then((chats) => {
+    void loadList().then((chats) => {
       if (chats) setActiveId((cur) => cur ?? chats[0]?.id ?? null);
     });
-    loadCatalog();
+    void loadCatalog();
   }, [loadList, loadCatalog]);
 
-  // Another page asked to open a chat.
-  useEffect(() => {
-    if (!handoffChatId) return;
-    takeHandoff();
-    setActiveId(handoffChatId);
-  }, [handoffChatId, takeHandoff]);
-
-  // Load the selected chat once; live chats stay in local state.
+  // Load the selected chat once; live chats stay in local state. A failed load
+  // shows its error until the next try (the error is keyed by chat id).
   useEffect(() => {
     if (!activeId || stateRef.current.chats[activeId]) return;
     const id = activeId;
-    setLoadError(null);
     chatGet(id)
       .then((loaded) => {
+        setLoadError((e) => (e?.id === id ? null : e));
         if (!stateRef.current.chats[loaded.id]) dispatch({ type: "setChat", chat: loaded });
       })
       .catch((err) => setLoadError({ id, message: errorMessage(err) }));
@@ -167,13 +175,13 @@ export default function ChatView() {
     if (await createChat()) textareaRef.current?.focus();
   }, [createChat]);
 
-  const newChatRef = useRef(newChat);
-  newChatRef.current = newChat;
+  // ⌘N starts a new chat.
+  const onNewChatKey = useEffectEvent(() => void newChat());
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
         e.preventDefault();
-        newChatRef.current();
+        onNewChatKey();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -297,11 +305,12 @@ export default function ChatView() {
         await approvalRespond(approvalId, decision);
         if (decision === "always") {
           // The engine saved approval=always in the config; keep the store in sync
-          // so a later config save does not undo it.
+          // so a later config save does not undo it. (The config-changed event
+          // does this too, so a failed read here is harmless.)
           getConfig()
             .then((fresh) => useApp.setState({ config: fresh }))
             .catch(() => undefined);
-          loadCatalog();
+          void loadCatalog();
         }
         return true;
       } catch (err) {
@@ -315,7 +324,7 @@ export default function ChatView() {
   // ---------- attachments ----------
   const addImagePaths = useCallback(
     (paths: string[]) => {
-      const items = paths.map((p) => ({ id: newId(), src: null, name: basename(p), loading: true }));
+      const items = paths.map((p) => ({ id: newId(), src: null, name: baseName(p), loading: true }));
       setAttachments((a) => [...a, ...items]);
       items.forEach((item, i) => {
         readImageDataUrl(paths[i])
@@ -356,7 +365,12 @@ export default function ChatView() {
   // ---------- derived ----------
   const dangerousTools = useMemo(() => new Set((catalog ?? []).filter((t) => t.dangerous).map((t) => t.id)), [catalog]);
   const runningIds = useMemo(
-    () => new Set(Object.entries(state.runs).filter(([, r]) => r.running).map(([id]) => id)),
+    () =>
+      new Set(
+        Object.entries(state.runs)
+          .filter(([, r]) => r.running)
+          .map(([id]) => id),
+      ),
     [state.runs],
   );
 
@@ -379,8 +393,7 @@ export default function ChatView() {
   }, [activeId, state.context, messages, config?.contextSize, fmContextSize]);
 
   const lastMessage = messages[messages.length - 1];
-  const showWelcome =
-    (list !== null && !activeId) || (!!chat && messages.length === 0 && !running);
+  const showWelcome = (list !== null && !activeId) || (!!chat && messages.length === 0 && !running);
   const draft = drafts[activeId ?? NEW_KEY] ?? "";
 
   return (
@@ -426,7 +439,7 @@ export default function ChatView() {
           />
 
           <div className="cv-scroll" ref={scrollRef} onScroll={onScroll}>
-            <div className="cv-thread" ref={contentRef} style={{ paddingBottom: dock.height + 28 }}>
+            <div className="cv-thread" ref={contentRef} style={{ paddingBottom: dockHeight + 28 }}>
               {loading && (
                 <div className="cv-center">
                   <Spinner />
@@ -438,17 +451,20 @@ export default function ChatView() {
                   <div className="xsmall selectable" style={{ marginTop: 4 }}>
                     {loadError.message}
                   </div>
-                  <Button size="sm" style={{ marginTop: 8 }} onClick={() => setReloadTick((t) => t + 1)}>
+                  <Button
+                    size="sm"
+                    style={{ marginTop: 8 }}
+                    onClick={() => {
+                      setLoadError(null);
+                      setReloadTick((t) => t + 1);
+                    }}
+                  >
                     Try again
                   </Button>
                 </Callout>
               )}
               {showWelcome && (
-                <Welcome
-                  onPick={(text) => send(text, [])}
-                  disabled={!ready.ready || creating}
-                  toolsOff={toolsOff}
-                />
+                <Welcome onPick={(text) => send(text, [])} disabled={!ready.ready || creating} toolsOff={toolsOff} />
               )}
               {(messages.length > 0 || running) && (
                 <div className="cv-thread__messages" key={activeId ?? NEW_KEY}>
@@ -460,7 +476,7 @@ export default function ChatView() {
                         key={i}
                         message={m}
                         streaming={running && m.id === run?.liveId}
-                        status={m.id === run?.liveId ? run?.status ?? null : null}
+                        status={m.id === run?.liveId ? (run?.status ?? null) : null}
                         approvals={m.id === run?.liveId ? run?.approvals : undefined}
                         dangerousTools={dangerousTools}
                         onRespond={respond}
@@ -475,7 +491,9 @@ export default function ChatView() {
                   )}
                 </div>
               )}
-              {!running && run?.error && <MessageError text={run.error} onRetry={ready.ready ? retryLive : undefined} />}
+              {!running && run?.error && (
+                <MessageError text={run.error} onRetry={ready.ready ? retryLive : undefined} />
+              )}
             </div>
           </div>
 
@@ -483,15 +501,16 @@ export default function ChatView() {
             <button
               type="button"
               className="cv-tobottom"
-              style={{ bottom: dock.height + 10 }}
+              style={{ bottom: dockHeight + 10 }}
               title="Scroll to the newest message"
+              aria-label="Scroll to the newest message"
               onClick={() => scrollToBottom(true)}
             >
               <ArrowDown size={15} />
             </button>
           )}
 
-          <div className="cv-dock" ref={dock.ref}>
+          <div className="cv-dock" ref={dockRef}>
             <Composer
               textareaRef={textareaRef}
               value={draft}

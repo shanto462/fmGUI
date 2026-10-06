@@ -1,14 +1,17 @@
-// Settings: fm binary path and context size. OWNER: agent "ui-shell".
+// Settings: fm binary path and context size.
 
 import { Gauge, RefreshCw, TerminalSquare } from "lucide-react";
 import { useRef } from "react";
-import { Button, Chip, Section, StatusDot, TextInput, formatNumber } from "../../components/ui";
+import { Button, Chip, PathInput, Section, StatusDot, TextInput } from "../../components/ui";
+import { DEFAULT_FM_PATH } from "../../lib/fmArgs";
+import { formatNumber } from "../../lib/format";
 import { useApp } from "../../lib/store";
 import type { AppConfig } from "../../lib/types";
-import { macosLabel, useSaveConfig } from "../overview/shared";
-import { SettingRow, useDraft } from "./SettingRow";
+import { useSaveConfig } from "../overview/hooks";
+import { macosLabel } from "../overview/status";
+import { SettingRow } from "./SettingRow";
+import { useDraft } from "./useDraft";
 
-const DEFAULT_PATH = "/usr/bin/fm";
 const MIN_CONTEXT = 1024;
 const MAX_CONTEXT = 65536;
 
@@ -26,7 +29,7 @@ export default function FmSection(props: { config: AppConfig }) {
 
   /** Saves the path when it changed, then checks fm again. */
   const savePath = async () => {
-    const next = path.trim() || DEFAULT_PATH;
+    const next = path.trim() || DEFAULT_FM_PATH;
     setPath(next);
     if (next === config.fmPath || savingPath.current === next) return;
     savingPath.current = next;
@@ -40,15 +43,15 @@ export default function FmSection(props: { config: AppConfig }) {
   const recheck = async () => {
     // A blur may have started the save already; it re-checks on its own.
     if (savingPath.current) return;
-    const next = path.trim() || DEFAULT_PATH;
+    const next = path.trim() || DEFAULT_FM_PATH;
     if (next !== config.fmPath) await savePath();
     else await refreshStatus();
   };
 
   const resetPath = async () => {
-    setPath(DEFAULT_PATH);
+    setPath(DEFAULT_FM_PATH);
     const saved = await save((c) => {
-      c.fmPath = DEFAULT_PATH;
+      c.fmPath = DEFAULT_FM_PATH;
     });
     if (saved) await refreshStatus();
   };
@@ -75,15 +78,15 @@ export default function FmSection(props: { config: AppConfig }) {
           icon={<TerminalSquare />}
           color="gray"
           label="fm path"
-          hint={`Where the fm command line tool lives. The default is ${DEFAULT_PATH}.`}
+          hint={`Where the fm command line tool lives. The default is ${DEFAULT_FM_PATH}.`}
           stacked
         >
           <div className="row">
-            <TextInput
+            <PathInput
               className="mono"
               value={path}
-              placeholder={DEFAULT_PATH}
-              onChange={(e) => setPath(e.target.value)}
+              placeholder={DEFAULT_FM_PATH}
+              onChange={setPath}
               onBlur={() => void savePath()}
               onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
             />
@@ -108,7 +111,7 @@ export default function FmSection(props: { config: AppConfig }) {
               </>
             )}
             <div className="spacer" />
-            {config.fmPath !== DEFAULT_PATH && (
+            {config.fmPath !== DEFAULT_FM_PATH && (
               <Button size="sm" variant="plain" onClick={resetPath}>
                 Use default
               </Button>

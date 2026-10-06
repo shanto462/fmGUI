@@ -1,30 +1,27 @@
 // Header of the open chat: editable title, instructions, tools chip and the
-// context meter. OWNER: agent "ui-chat".
+// context meter.
 
 import { Pencil, ScrollText, Wrench } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { Button, Callout, Field, Meter, Modal, TextArea, cx, formatNumber } from "../../components/ui";
+import { useRef, useState } from "react";
+import { Button, Callout, Field, Meter, Modal, TextArea } from "../../components/ui";
+import { cx } from "../../lib/cx";
+import { formatNumber, pluralize } from "../../lib/format";
 import { useApp } from "../../lib/store";
 import type { Chat } from "../../lib/types";
 import type { ContextUse } from "./chatState";
-import { pluralize } from "./utils";
 
 function EditableTitle(props: { title: string; onSave: (title: string) => Promise<boolean>; disabled?: boolean }) {
   const [editing, setEditing] = useState(false);
+  // Only used while editing. It starts from the current title each time.
   const [draft, setDraft] = useState(props.title);
   const cancelled = useRef(false);
-
-  useEffect(() => {
-    if (!editing) setDraft(props.title);
-  }, [props.title, editing]);
 
   async function commit() {
     setEditing(false);
     if (cancelled.current) return;
     const title = draft.trim();
     if (!title || title === props.title) return;
-    const ok = await props.onSave(title);
-    if (!ok) setDraft(props.title);
+    await props.onSave(title);
   }
 
   if (editing) {
@@ -54,6 +51,7 @@ function EditableTitle(props: { title: string; onSave: (title: string) => Promis
       disabled={props.disabled}
       onClick={() => {
         cancelled.current = false;
+        setDraft(props.title);
         setEditing(true);
       }}
     >
@@ -124,7 +122,7 @@ function InstructionsModal(props: {
   );
 }
 
-export function ContextMeter(props: { context: ContextUse | null }) {
+function ContextMeter(props: { context: ContextUse | null }) {
   const c = props.context;
   if (!c || !c.size) {
     return (
@@ -174,7 +172,11 @@ export function ChatHeader(props: {
           <div className="cv-title cv-title--static">New chat</div>
         )}
         <div className="cv-header__sub" data-tauri-drag-region>
-          {chat ? (count === 0 ? "No messages yet" : pluralize(count, "message")) : "Ask anything. It runs on this Mac."}
+          {chat
+            ? count === 0
+              ? "No messages yet"
+              : pluralize(count, "message")
+            : "Ask anything. It runs on this Mac."}
         </div>
       </div>
       <div className="cv-header__actions">

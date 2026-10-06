@@ -1,11 +1,11 @@
 // "New CLI session" sheet: instructions + first message. The parent turns it
-// into `fm respond -i … --save-transcript <new file> -- <prompt>`. OWNER: agent "ui-chat".
+// into `fm respond -i … --save-transcript <new file> -- <prompt>`.
 
 import { useMemo, useState } from "react";
 import { Button, Callout, CommandPreview, Field, Modal, TextArea } from "../../components/ui";
 import { displayCommand, respondArgs } from "../../lib/fmArgs";
-import type { ModelReady } from "../chat/ModelReady";
-import type { CliRunOptions } from "./RunOptions";
+import { type ModelReady } from "../chat/useModelReady";
+import { type CliRunOptions } from "./options";
 
 function slug(text: string): string {
   const s = text
@@ -64,7 +64,11 @@ export function NewSessionModal(props: {
       onClose={props.onClose}
       footer={
         <>
-          {!props.ready.ready && <span className="xsmall" style={{ color: "var(--orange)" }}>{props.ready.hint}</span>}
+          {!props.ready.ready && (
+            <span className="xsmall" style={{ color: "var(--orange)" }}>
+              {props.ready.hint}
+            </span>
+          )}
           <div className="spacer" />
           <Button onClick={props.onClose}>Cancel</Button>
           <Button variant="primary" loading={busy} disabled={!canStart} onClick={start}>
@@ -75,8 +79,8 @@ export function NewSessionModal(props: {
     >
       <div className="stack">
         <Callout>
-          The session is saved in ~/.fm/sessions, the same folder <span className="mono">fm chat</span> uses. You
-          can keep talking here or open it in Terminal later.
+          The session is saved in ~/.fm/sessions, the same folder <span className="mono">fm chat</span> uses. You can
+          keep talking here or open it in Terminal later.
         </Callout>
         <Field label="Instructions" hint="Optional. Tell the model how to behave for the whole session.">
           <TextArea
@@ -103,7 +107,9 @@ export function NewSessionModal(props: {
         <div className="field">
           <span className="field__label">Command</span>
           <CommandPreview command={preview} />
-          <span className="field__hint">The file name comes from your first message. Options from the composer apply.</span>
+          <span className="field__hint">
+            The file name comes from your first message. Options from the composer apply.
+          </span>
         </div>
         {error && <Callout tone="error">{error}</Callout>}
       </div>

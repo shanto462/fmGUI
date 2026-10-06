@@ -1,18 +1,15 @@
-// Settings: folders the file tools may use. OWNER: agent "ui-shell".
+// Settings: folders the file tools may use.
 
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Folder, FolderPlus, Minus, Search } from "lucide-react";
 import { Button, Callout, IconButton, Section } from "../../components/ui";
 import { errorMessage } from "../../lib/api";
+import { baseName, tildePath } from "../../lib/paths";
 import { useApp } from "../../lib/store";
 import type { AppConfig } from "../../lib/types";
-import { IconTile, tildify, useSaveConfig } from "../overview/shared";
-
-function baseName(path: string): string {
-  const parts = path.replace(/\/+$/, "").split("/");
-  return parts[parts.length - 1] || path;
-}
+import { useSaveConfig } from "../overview/hooks";
+import { IconTile } from "../overview/shared";
 
 export default function FoldersSection(props: { config: AppConfig }) {
   const folders = props.config.allowedFolders;
@@ -59,7 +56,9 @@ export default function FoldersSection(props: { config: AppConfig }) {
     }
   };
 
-  const tooWide = folders.some((f) => f === "/" || (home != null && f.replace(/\/+$/, "") === home.replace(/\/+$/, "")));
+  const tooWide = folders.some(
+    (f) => f === "/" || (home != null && f.replace(/\/+$/, "") === home.replace(/\/+$/, "")),
+  );
 
   return (
     <Section title="Allowed folders">
@@ -82,8 +81,8 @@ export default function FoldersSection(props: { config: AppConfig }) {
             </IconTile>
             <div className="group__label">
               <div className="truncate">{baseName(f)}</div>
-              <div className="group__hint truncate mono selectable" title={f}>
-                {tildify(f, home)}
+              <div className="group__hint truncate mono selectable" title={tildePath(f, home)}>
+                {tildePath(f, home)}
               </div>
             </div>
             <IconButton label="Show in Finder" onClick={() => reveal(f)}>

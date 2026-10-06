@@ -1,11 +1,11 @@
 // A form generated from a JSON schema (string, integer, number, boolean, enum),
 // with a raw JSON fallback. Used by the tool "Test" modal and the wizard test step.
-// OWNER: agent "ui-extend".
 
 import { Play } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Badge, Button, Callout, CodeBlock, Field, Select, TextArea, TextInput, Toggle, formatDuration } from "../../components/ui";
+import { useMemo, useState, type ReactNode } from "react";
+import { Badge, Button, Callout, CodeBlock, Field, Select, TextArea, TextInput, Toggle } from "../../components/ui";
 import { errorMessage } from "../../lib/api";
+import { formatDuration } from "../../lib/format";
 import type { ToolTestResult } from "../../lib/types";
 
 type Kind = "string" | "integer" | "number" | "boolean" | "enum" | "json";
@@ -103,21 +103,24 @@ function collect(fields: FieldSpec[], values: Values): Collected {
 }
 
 /** Returns the form UI and a function that reads the arguments. */
-export function useArgsForm(schema: unknown): { form: ReactNode; read: () => Collected } {
+function useArgsForm(schema: unknown): { form: ReactNode; read: () => Collected } {
   const fields = useMemo(() => fieldsFromSchema(schema), [schema]);
   const [values, setValues] = useState<Values>(() => initialValues(fields));
   const [jsonMode, setJsonMode] = useState(fields === null);
   const [jsonText, setJsonText] = useState("{}");
+  const [shownFields, setShownFields] = useState(fields);
 
-  // Keep values when the fields change (wizard: user edits parameters).
-  useEffect(() => {
+  // The fields changed (in the wizard the user edits the parameters): keep the
+  // values that still fit. Done during render, so there is no extra render.
+  if (shownFields !== fields) {
+    setShownFields(fields);
     setValues((prev) => {
       const next = initialValues(fields);
       for (const k of Object.keys(next)) if (k in prev && typeof prev[k] === typeof next[k]) next[k] = prev[k];
       return next;
     });
     if (fields === null) setJsonMode(true);
-  }, [fields]);
+  }
 
   const set = (name: string, v: string | boolean) => setValues((prev) => ({ ...prev, [name]: v }));
 
@@ -125,7 +128,8 @@ export function useArgsForm(schema: unknown): { form: ReactNode; read: () => Col
     if (jsonMode || fields === null) {
       try {
         const parsed = JSON.parse(jsonText.trim() || "{}");
-        if (!isObj(parsed)) return { ok: false, error: "Arguments must be a JSON object, for example {\"city\": \"Paris\"}." };
+        if (!isObj(parsed))
+          return { ok: false, error: 'Arguments must be a JSON object, for example {"city": "Paris"}.' };
         return { ok: true, args: parsed };
       } catch (err) {
         return { ok: false, error: `The JSON is not valid: ${errorMessage(err)}` };
@@ -201,7 +205,9 @@ export function useArgsForm(schema: unknown): { form: ReactNode; read: () => Col
               ...(f.required ? [] : [{ value: "", label: "(not set)" }]),
               ...f.enumValues.map((e) => ({ value: String(e), label: String(e) })),
             ];
-            control = <Select value={String(values[f.name] ?? "")} onChange={(v) => set(f.name, v)} options={options} />;
+            control = (
+              <Select value={String(values[f.name] ?? "")} onChange={(v) => set(f.name, v)} options={options} />
+            );
           } else if (f.kind === "json") {
             control = (
               <TextArea
@@ -248,7 +254,14 @@ export function useArgsForm(schema: unknown): { form: ReactNode; read: () => Col
 }
 
 function kindLabel(k: Kind): string {
-  return { string: "text", integer: "whole number", number: "number", boolean: "yes / no", enum: "choice", json: "JSON" }[k];
+  return {
+    string: "text",
+    integer: "whole number",
+    number: "number",
+    boolean: "yes / no",
+    enum: "choice",
+    json: "JSON",
+  }[k];
 }
 
 /** Argument form + Run button + output. */

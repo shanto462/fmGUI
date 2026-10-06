@@ -1,4 +1,4 @@
-/* Schema Builder styles. OWNER: agent "ui-build". Class prefix: sb-. */
+/* Schema Builder styles. Class prefix: sb-. */
 
 .sb-props {
   display: flex;
@@ -17,7 +17,9 @@
 }
 
 .sb-prop--error {
-  box-shadow: var(--shadow-sm), inset 0 0 0 1px color-mix(in srgb, var(--red) 45%, transparent);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 0 0 1px color-mix(in srgb, var(--red) 45%, transparent);
 }
 
 .sb-prop__line {

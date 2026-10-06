@@ -1,4 +1,4 @@
-// Settings, grouped like System Settings. Changes save right away. OWNER: agent "ui-shell".
+// Settings, grouped like System Settings. Changes save right away.
 
 import { Page } from "../components/ui";
 import { useApp } from "../lib/store";

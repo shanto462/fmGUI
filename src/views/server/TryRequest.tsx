@@ -1,13 +1,25 @@
-// "Try it" panel: send a request to the running public server. OWNER: agent "ui-build".
+// "Try it" panel: send a request to the running public server.
 
 import { ImagePlus, Send } from "lucide-react";
 import { useState } from "react";
-import { Badge, Button, Callout, Chip, CodeBlock, CommandPreview, Field, Select, TextArea, TextInput, formatDuration } from "../../components/ui";
+import {
+  Badge,
+  Button,
+  Callout,
+  Chip,
+  CodeBlock,
+  CommandPreview,
+  Field,
+  Select,
+  TextArea,
+  TextInput,
+} from "../../components/ui";
 import { errorMessage, publicServerRequest, readImageDataUrl } from "../../lib/api";
+import { IMAGE_EXTENSIONS, pickFile } from "../../lib/dialogs";
 import { shellQuote } from "../../lib/fmArgs";
+import { formatDuration, formatNumber, jsonError, tryPrettyJson } from "../../lib/format";
 import { useApp } from "../../lib/store";
 import type { HttpResult } from "../../lib/types";
-import { IMAGE_EXTENSIONS, jsonError, pickFile, tryPrettyJson } from "../playground/workbench";
 import { IMAGE_PLACEHOLDER, TRY_PRESETS, type Target } from "./snippets";
 
 type Method = "GET" | "POST";
@@ -160,7 +172,7 @@ export function TryRequest(props: { target: Target; running: boolean }) {
           <div className="row">
             <Badge tone={tone}>HTTP {result.status}</Badge>
             <span className="xsmall muted">{formatDuration(result.durationMs)}</span>
-            <span className="xsmall muted">· {result.body.length.toLocaleString("en-US")} bytes</span>
+            <span className="xsmall muted">· {formatNumber(result.body.length)} bytes</span>
           </div>
           <CodeBlock code={prettyBody ?? (result.body || "(empty body)")} wrap maxHeight={420} />
         </div>

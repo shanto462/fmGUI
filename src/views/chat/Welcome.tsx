@@ -1,10 +1,9 @@
 // Empty chat: a calm welcome with suggestions that show off the tools.
-// OWNER: agent "ui-chat".
 
 import { Calculator, Clock, FileSearch, Globe, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 
-export const SUGGESTIONS: { text: string; hint: string; icon: ReactNode }[] = [
+const SUGGESTIONS: { text: string; hint: string; icon: ReactNode }[] = [
   { text: "What time is it?", hint: "Clock tool", icon: <Clock size={16} /> },
   { text: "What is 1234.5 × 987.25?", hint: "Calculator tool", icon: <Calculator size={16} /> },
   { text: "Summarize https://www.apple.com/newsroom/", hint: "Web page tool", icon: <Globe size={16} /> },

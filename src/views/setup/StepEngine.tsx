@@ -1,13 +1,16 @@
-// Setup step 5: start the private chat engine and test the model. OWNER: agent "ui-shell".
+// Setup step 5: start the private chat engine and test the model.
 
 import { Hand, Lock, Play, RefreshCw, Sparkles, Square, Zap } from "lucide-react";
 import { useRef, useState } from "react";
-import { Badge, Button, Callout, CommandPreview, Spinner, formatDuration } from "../../components/ui";
+import { Badge, Button, Callout, CommandPreview, Spinner } from "../../components/ui";
 import { errorMessage, fmCancel, fmRun, newId } from "../../lib/api";
 import { displayCommand } from "../../lib/fmArgs";
+import { formatDuration } from "../../lib/format";
+import { tildePath } from "../../lib/paths";
 import { useApp } from "../../lib/store";
 import type { RunResult } from "../../lib/types";
-import { CheckRow, IconTile, engineCheckState, tildify, type EngineHandle } from "../overview/shared";
+import { engineCheckState, type EngineHandle } from "../overview/hooks";
+import { CheckRow, IconTile } from "../overview/shared";
 import { StepFrame } from "./StepFrame";
 
 const HELLO_ARGS = ["respond", "--no-stream", "--", "Say hello in one short sentence."];
@@ -27,6 +30,7 @@ export default function StepEngine(props: { engine: EngineHandle }) {
   const { engine } = props;
   const config = useApp((s) => s.config);
   const home = useApp((s) => s.paths?.homeDir);
+  const toast = useApp((s) => s.toast);
   const [hello, setHello] = useState<HelloResult | null>(null);
   const [live, setLive] = useState("");
   const [running, setRunning] = useState(false);
@@ -55,7 +59,8 @@ export default function StepEngine(props: { engine: EngineHandle }) {
   };
 
   const stop = () => {
-    if (runId.current) fmCancel(runId.current).catch(() => undefined);
+    if (runId.current)
+      fmCancel(runId.current).catch((err) => toast(`Could not stop fm. ${errorMessage(err)}`, "error"));
   };
 
   return (
@@ -93,7 +98,7 @@ export default function StepEngine(props: { engine: EngineHandle }) {
                     ? "Stopped"
                     : "Status unknown"
           }
-          value={st?.socketPath ? tildify(st.socketPath, home) : undefined}
+          value={st?.socketPath ? tildePath(st.socketPath, home) : undefined}
           mono
         />
       </div>

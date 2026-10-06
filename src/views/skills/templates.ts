@@ -1,4 +1,4 @@
-// Starter templates for the "New skill" wizard. OWNER: agent "ui-extend".
+// Starter templates for the "New skill" wizard.
 
 export const SKILL_NAME_RE = /^[a-z0-9-]{1,64}$/;
 
@@ -71,7 +71,7 @@ Turn raw meeting notes into a clean summary.
     title: "Explain like I am 10",
     summary: "Simple words, one example, three key points.",
     name: "explain-like-10",
-    description: "Use when the user asks for a simple explanation, or says \"explain like I am 10\".",
+    description: 'Use when the user asks for a simple explanation, or says "explain like I am 10".',
     body: `# Explain like I am 10
 
 Explain the topic so a 10-year-old can follow it.

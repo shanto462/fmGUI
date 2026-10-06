@@ -1,11 +1,12 @@
 // Left column of the Chat view: new chat, search, and the chat list with
-// inline rename and delete. OWNER: agent "ui-chat".
+// inline rename and delete.
 
 import { MessageSquare, Pencil, Search, SquarePen, Trash } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
-import { Button, IconButton, Spinner, cx, formatTime } from "../../components/ui";
+import { Button, IconButton, Spinner } from "../../components/ui";
+import { cx } from "../../lib/cx";
+import { formatTime, pluralize } from "../../lib/format";
 import type { ChatSummary } from "../../lib/types";
-import { pluralize } from "./utils";
 
 export function ChatList(props: {
   chats: ChatSummary[] | null;
@@ -60,6 +61,7 @@ export function ChatList(props: {
         <input
           className="cv-search__input"
           placeholder="Search"
+          aria-label="Search chats"
           value={query}
           spellCheck={false}
           onChange={(e) => setQuery(e.target.value)}
@@ -100,12 +102,17 @@ export function ChatList(props: {
               key={chat.id}
               role="button"
               tabIndex={0}
+              aria-current={active ? "true" : undefined}
               className={cx("list-row cv-row", active && "list-row--active", editing && "cv-row--editing")}
               onClick={() => !editing && props.onSelect(chat.id)}
               onDoubleClick={() => startEdit(chat)}
               onKeyDown={(e) => {
-                if (editing) return;
-                if (e.key === "Enter") props.onSelect(chat.id);
+                // Keys typed in the rename field or on the row buttons belong to them.
+                if (editing || e.target !== e.currentTarget) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  props.onSelect(chat.id);
+                }
                 if (e.key === "F2") startEdit(chat);
               }}
             >
@@ -131,13 +138,12 @@ export function ChatList(props: {
                 ) : (
                   <span className="list-row__title">{chat.title || "New chat"}</span>
                 )}
-                {!editing && (
-                  <span className="cv-row__time">{running ? <Spinner /> : formatTime(chat.updatedAt)}</span>
-                )}
+                {!editing && <span className="cv-row__time">{running ? <Spinner /> : formatTime(chat.updatedAt)}</span>}
               </div>
               {!editing && (
                 <div className="list-row__meta">
-                  {chat.preview || (chat.messageCount === 0 ? "No messages yet" : pluralize(chat.messageCount, "message"))}
+                  {chat.preview ||
+                    (chat.messageCount === 0 ? "No messages yet" : pluralize(chat.messageCount, "message"))}
                 </div>
               )}
               {!editing && (

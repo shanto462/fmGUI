@@ -1,4 +1,4 @@
-// Setup step 1: what fmGUI does, and the privacy note. OWNER: agent "ui-shell".
+// Setup step 1: what fmGUI does, and the privacy note.
 
 import { Lock, MessageSquare, Plug, Radio, Sparkles, TerminalSquare, Wrench } from "lucide-react";
 import type { ReactNode } from "react";
@@ -7,10 +7,20 @@ import { StepFrame } from "./StepFrame";
 
 const FEATURES: { icon: ReactNode; color: TileColor; title: string; text: string }[] = [
   { icon: <MessageSquare />, color: "blue", title: "Chat", text: "Talk with Apple's on-device model." },
-  { icon: <Wrench />, color: "gray", title: "Tools", text: "Let the model use a calculator, files, or your own scripts." },
+  {
+    icon: <Wrench />,
+    color: "gray",
+    title: "Tools",
+    text: "Let the model use a calculator, files, or your own scripts.",
+  },
   { icon: <Plug />, color: "purple", title: "MCP servers", text: "Connect a server to add a set of tools at once." },
   { icon: <Sparkles />, color: "orange", title: "Skills", text: "Teach the model know-how with SKILL.md files." },
-  { icon: <TerminalSquare />, color: "indigo", title: "CLI playground", text: "Try every fm option and see the exact command." },
+  {
+    icon: <TerminalSquare />,
+    color: "indigo",
+    title: "CLI playground",
+    text: "Try every fm option and see the exact command.",
+  },
   { icon: <Radio />, color: "green", title: "API server", text: "Run an OpenAI style API on this Mac for your apps." },
 ];
 
@@ -22,8 +32,8 @@ export default function StepWelcome() {
       title="Welcome to fmGUI"
       lead={
         <>
-          A friendly Mac app for Apple's on-device model. It uses <code>fm</code>, the command line tool that
-          comes with macOS 27.
+          A friendly Mac app for Apple's on-device model. It uses <code>fm</code>, the command line tool that comes with
+          macOS 27.
         </>
       }
     >

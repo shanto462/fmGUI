@@ -1,129 +1,18 @@
-// Shared pieces for the Tools, MCP Servers and Skills pages. OWNER: agent "ui-extend".
+// Shared pieces for the Tools, MCP Servers and Skills pages.
 
-import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, Plus, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Button, Callout, IconButton, Meter, Modal, TextInput, cx, formatNumber } from "../../components/ui";
-import { errorMessage, skillsList, toolsCatalog } from "../../lib/api";
-import type { AppConfig, Approval, KeyValue, Skill, SkillMode, ToolInfo } from "../../lib/types";
+import { useMemo, useState, type ReactNode } from "react";
+import { Button, Callout, IconButton, Meter, Modal, PathInput, TextInput } from "../../components/ui";
+import { errorMessage } from "../../lib/api";
+import { cx } from "../../lib/cx";
+import { pickFolder } from "../../lib/dialogs";
+import { formatNumber } from "../../lib/format";
+import { useApp } from "../../lib/store";
+import type { AppConfig, Approval, KeyValue, Skill, ToolInfo } from "../../lib/types";
+import { computeBudget } from "./helpers";
 import "./extend.css";
 
-// ---------- small helpers ----------
-
-/** Rough token estimate: about 4 characters per token. */
-export const estimateTokens = (text: string) => Math.ceil(text.length / 4);
-
-/** Estimate for a tool: its JSON schema plus its description, about 4 characters per token. */
-export function toolTokenEstimate(inputSchema: unknown, description: string, name = ""): number {
-  let schema = "";
-  try {
-    schema = JSON.stringify(inputSchema ?? {}) ?? "";
-  } catch {
-    schema = "";
-  }
-  return Math.ceil((schema.length + description.length + name.length) / 4);
-}
-
-export const skillMode = (config: AppConfig, name: string): SkillMode => config.skills[name]?.mode ?? "onDemand";
-
-export const APPROVAL_OPTIONS: { value: Approval; label: string }[] = [
-  { value: "ask", label: "Ask every time" },
-  { value: "always", label: "Always allow" },
-];
-
-export const tokensLabel = (n: number) => `≈ ${formatNumber(n)} tokens`;
-
-/** Opens the macOS folder picker. Returns null when the user cancels. */
-export async function pickFolder(title: string, defaultPath?: string): Promise<string | null> {
-  const picked = await open({ directory: true, multiple: false, title, defaultPath: defaultPath || undefined });
-  return typeof picked === "string" ? picked : null;
-}
-
-/** Quotes a shell word only when needed, for display. */
-export function shellQuote(word: string): string {
-  if (word === "") return "''";
-  if (/^[A-Za-z0-9_@%+=:,./~-]+$/.test(word)) return word;
-  return `'${word.replace(/'/g, `'\\''`)}'`;
-}
-
-// ---------- data ----------
-
-/** Loads the tool catalog and the skill list, for pages that show the context budget. */
-export function useExtendData() {
-  const [tools, setTools] = useState<ToolInfo[] | null>(null);
-  const [skills, setSkills] = useState<Skill[] | null>(null);
-  const [toolsError, setToolsError] = useState<string | null>(null);
-  const [skillsError, setSkillsError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const alive = useRef(true);
-
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-
-  const reload = useCallback(async () => {
-    setLoading(true);
-    const [t, s] = await Promise.allSettled([toolsCatalog(), skillsList()]);
-    if (!alive.current) return;
-    if (t.status === "fulfilled") {
-      setTools(t.value);
-      setToolsError(null);
-    } else {
-      setToolsError(errorMessage(t.reason));
-      setTools((prev) => prev ?? []);
-    }
-    if (s.status === "fulfilled") {
-      setSkills(s.value);
-      setSkillsError(null);
-    } else {
-      setSkillsError(errorMessage(s.reason));
-      setSkills((prev) => prev ?? []);
-    }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    reload();
-  }, [reload]);
-
-  return { tools, setTools, skills, setSkills, toolsError, skillsError, loading, reload };
-}
-
 // ---------- context budget ----------
-
-export interface Budget {
-  toolTokens: number;
-  skillTokens: number;
-  total: number;
-  contextSize: number;
-  ratio: number;
-  toolCount: number;
-  alwaysSkills: number;
-  toolsOff: boolean;
-}
-
-export function computeBudget(config: AppConfig, tools: ToolInfo[] | null, skills: Skill[] | null): Budget {
-  const toolsOff = !config.chatDefaults.toolsEnabled;
-  const enabledTools = (tools ?? []).filter((t) => t.enabled);
-  const toolTokens = toolsOff ? 0 : enabledTools.reduce((sum, t) => sum + (t.tokenEstimate || 0), 0);
-  const always = (skills ?? []).filter((s) => skillMode(config, s.name) === "always");
-  const skillTokens = always.reduce((sum, s) => sum + (s.tokenEstimate || 0), 0);
-  const total = toolTokens + skillTokens;
-  const contextSize = config.contextSize > 0 ? config.contextSize : 8192;
-  return {
-    toolTokens,
-    skillTokens,
-    total,
-    contextSize,
-    ratio: total / contextSize,
-    toolCount: toolsOff ? 0 : enabledTools.length,
-    alwaysSkills: always.length,
-    toolsOff,
-  };
-}
 
 /** "Context used by tools and skills" meter with advice above 25%. */
 export function ContextBudget(props: {
@@ -132,7 +21,10 @@ export function ContextBudget(props: {
   skills: Skill[] | null;
   compact?: boolean;
 }) {
-  const b = useMemo(() => computeBudget(props.config, props.tools, props.skills), [props.config, props.tools, props.skills]);
+  const b = useMemo(
+    () => computeBudget(props.config, props.tools, props.skills),
+    [props.config, props.tools, props.skills],
+  );
   const pct = Math.round(b.ratio * 100);
   const loading = props.tools === null || props.skills === null;
   const advice =
@@ -178,8 +70,8 @@ export function ContextBudget(props: {
         {b.toolsOff
           ? "Tools are turned off for chats in Settings, so they use no context."
           : `${b.toolCount} enabled ${b.toolCount === 1 ? "tool" : "tools"}: ${formatNumber(b.toolTokens)} tokens.`}{" "}
-        {b.alwaysSkills} always-on {b.alwaysSkills === 1 ? "skill" : "skills"}: {formatNumber(b.skillTokens)} tokens. The
-        on-device model has a small context window, so keep this under 25%.
+        {b.alwaysSkills} always-on {b.alwaysSkills === 1 ? "skill" : "skills"}: {formatNumber(b.skillTokens)} tokens.
+        The on-device model has a small context window, so keep this under 25%.
       </div>
       {advice}
     </div>
@@ -300,7 +192,11 @@ export function KeyValueEditor(props: {
         </div>
       ))}
       <div>
-        <Button size="sm" icon={<Plus size={13} />} onClick={() => props.onChange([...props.rows, { key: "", value: "" }])}>
+        <Button
+          size="sm"
+          icon={<Plus size={13} />}
+          onClick={() => props.onChange([...props.rows, { key: "", value: "" }])}
+        >
           {props.addLabel ?? "Add"}
         </Button>
       </div>
@@ -325,7 +221,23 @@ export function StringListEditor(props: {
           <span className="xsmall muted" style={{ width: 16, textAlign: "right" }}>
             {i + 1}
           </span>
-          <TextInput className="mono" style={{ flex: 1 }} value={item} placeholder={props.placeholder} onChange={(e) => set(i, e.target.value)} />
+          {props.folderPicker ? (
+            <PathInput
+              className="mono"
+              style={{ flex: 1 }}
+              value={item}
+              placeholder={props.placeholder}
+              onChange={(v) => set(i, v)}
+            />
+          ) : (
+            <TextInput
+              className="mono"
+              style={{ flex: 1 }}
+              value={item}
+              placeholder={props.placeholder}
+              onChange={(e) => set(i, e.target.value)}
+            />
+          )}
           {props.folderPicker && (
             <IconButton
               label="Choose a folder"
@@ -365,12 +277,12 @@ export function FolderField(props: {
 }) {
   return (
     <div className="ext-editor-row">
-      <TextInput
+      <PathInput
         className="mono"
         style={{ flex: 1 }}
         value={props.value}
-        placeholder={props.placeholder ?? "/Users/you/Documents"}
-        onChange={(e) => props.onChange(e.target.value)}
+        placeholder={props.placeholder ?? "~/Documents"}
+        onChange={props.onChange}
       />
       <Button
         icon={<FolderOpen size={14} />}
@@ -404,6 +316,7 @@ export function ConfirmModal(props: {
   onConfirm: () => Promise<void> | void;
   onClose: () => void;
 }) {
+  const toast = useApp((s) => s.toast);
   const [busy, setBusy] = useState(false);
   return (
     <Modal
@@ -422,6 +335,8 @@ export function ConfirmModal(props: {
               setBusy(true);
               try {
                 await props.onConfirm();
+              } catch (err) {
+                toast(errorMessage(err), "error");
               } finally {
                 setBusy(false);
               }

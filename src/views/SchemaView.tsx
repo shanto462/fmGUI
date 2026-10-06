@@ -1,8 +1,8 @@
-// Schema Builder: a visual front end for `fm schema object`. OWNER: agent "ui-build".
+// Schema Builder: a visual front end for `fm schema object`.
 // Left: type name + property rows. Right: live JSON from fm, actions, and "Try it".
 
 import { Braces, Copy, Save, TerminalSquare } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Badge,
   Button,
@@ -16,9 +16,20 @@ import {
   TextInput,
 } from "../components/ui";
 import { errorMessage, fmRun, writeTextFile } from "../lib/api";
-import { displayCommand, schemaObjectArgs, validateSchema, type SchemaDefinition, type SchemaProperty } from "../lib/fmArgs";
+import { pickSavePath } from "../lib/dialogs";
+import {
+  DEFAULT_FM_PATH,
+  displayCommand,
+  schemaObjectArgs,
+  validateSchema,
+  type SchemaDefinition,
+  type SchemaProperty,
+} from "../lib/fmArgs";
+import { stripAnsi, tryPrettyJson } from "../lib/format";
+import { useDebouncedValue } from "../lib/hooks";
+import { tildePath } from "../lib/paths";
 import { useApp } from "../lib/store";
-import { InspectorSection, Toolbar, Workbench, pickSavePath, stripAnsi, tryPrettyJson, useDebouncedValue } from "./playground/workbench";
+import { InspectorSection, Toolbar, Workbench } from "./playground/workbench";
 import { PRESETS } from "./schema/presets";
 import { PropertyList } from "./schema/PropertyList";
 import { useSchemaBuilder } from "./schema/store";
@@ -38,30 +49,31 @@ export default function SchemaView() {
   const config = useApp((s) => s.config);
   const navigate = useApp((s) => s.navigate);
   const toast = useApp((s) => s.toast);
-  const fmPath = config?.fmPath || "/usr/bin/fm";
+  const home = useApp((s) => s.paths?.homeDir);
+  const fmPath = config?.fmPath || DEFAULT_FM_PATH;
 
   const [focusId, setFocusId] = useState<string | null>(null);
   const [gen, setGen] = useState<Generated | null>(null);
-  const [pending, setPending] = useState(false);
-  const seq = useRef(0);
 
   const problems = validateSchema(def);
   const key = JSON.stringify(def);
   const debouncedKey = useDebouncedValue(key, 300);
+  const debouncedValid = useMemo(
+    () => validateSchema(JSON.parse(debouncedKey) as SchemaDefinition).length === 0,
+    [debouncedKey],
+  );
+  // Waiting for fm to answer for the latest valid schema.
+  const pending = debouncedValid && gen?.key !== debouncedKey;
   const command = displayCommand(schemaObjectArgs(def), fmPath);
 
   // Live JSON: run `fm schema object` (it takes a few ms) after a short pause.
   useEffect(() => {
+    if (!debouncedValid) return;
+    let current = true;
     const d = JSON.parse(debouncedKey) as SchemaDefinition;
-    if (validateSchema(d).length) {
-      setPending(false);
-      return;
-    }
-    const mine = ++seq.current;
-    setPending(true);
     fmRun(schemaObjectArgs(d), () => {})
       .then((res) => {
-        if (mine !== seq.current) return;
+        if (!current) return;
         if (res.exitCode === 0 && res.stdout.trim()) {
           const out = res.stdout.trim();
           setGen({ key: debouncedKey, json: tryPrettyJson(out) ?? out, error: null });
@@ -71,15 +83,15 @@ export default function SchemaView() {
         }
       })
       .catch((err) => {
-        if (mine === seq.current) setGen({ key: debouncedKey, json: null, error: errorMessage(err) });
-      })
-      .finally(() => {
-        if (mine === seq.current) setPending(false);
+        if (current) setGen({ key: debouncedKey, json: null, error: errorMessage(err) });
       });
-  }, [debouncedKey]);
+    return () => {
+      current = false;
+    };
+  }, [debouncedKey, debouncedValid]);
 
   const upToDate = gen?.key === key && problems.length === 0;
-  const json = upToDate ? gen?.json ?? null : null;
+  const json = upToDate ? (gen?.json ?? null) : null;
   const shownJson = gen?.json ?? null;
 
   const setProps = (properties: SchemaProperty[]) => setDef({ ...def, properties });
@@ -103,7 +115,7 @@ export default function SchemaView() {
       });
       if (!path) return;
       await writeTextFile(path, json + "\n");
-      toast(`Saved ${path}`, "success");
+      toast(`Saved ${tildePath(path, home)}`, "success");
     } catch (err) {
       toast(errorMessage(err), "error");
     }
@@ -128,7 +140,10 @@ export default function SchemaView() {
         <Select<string>
           value=""
           onChange={applyPreset}
-          options={[{ value: "", label: "Start from a preset…" }, ...PRESETS.map((p) => ({ value: p.id, label: p.label }))]}
+          options={[
+            { value: "", label: "Start from a preset…" },
+            ...PRESETS.map((p) => ({ value: p.id, label: p.label })),
+          ]}
           style={{ width: 190 }}
         />
       }
@@ -147,10 +162,7 @@ export default function SchemaView() {
                 />
               </Field>
             </InspectorSection>
-            <InspectorSection
-              title="Properties"
-              badge={<span className="badge">{def.properties.length}</span>}
-            >
+            <InspectorSection title="Properties" badge={<span className="badge">{def.properties.length}</span>}>
               <div className="xsmall muted">
                 Use dot notation for nested objects: <span className="mono">address.street</span> and{" "}
                 <span className="mono">address.city</span> become one <span className="mono">Address</span> object.
@@ -230,9 +242,9 @@ export default function SchemaView() {
             )}
             <Callout>
               Writing a schema by hand? fm needs <span className="mono">title</span>,{" "}
-              <span className="mono">"additionalProperties": false</span> and <span className="mono">x-order</span> on every
-              object. If one is missing, fm stops with a vague error: "The data couldn't be read because it is missing."
-              This builder lets fm generate them for you.
+              <span className="mono">"additionalProperties": false</span> and <span className="mono">x-order</span> on
+              every object. If one is missing, fm stops with a vague error: "The data couldn't be read because it is
+              missing." This builder lets fm generate them for you.
             </Callout>
             <TryIt json={json} rootName={def.rootName.trim()} />
           </div>

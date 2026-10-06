@@ -1,5 +1,8 @@
-// CONTRACT FILE (owned by the lead). Builds `fm` argument lists from UI state.
+// Builds `fm` argument lists from UI state.
 // Every flag here was tested against /usr/bin/fm on macOS 27.0.1.
+
+/** Where macOS 27 installs fm. */
+export const DEFAULT_FM_PATH = "/usr/bin/fm";
 
 export type UseCase = "general" | "content-tagging";
 export type Guardrails = "default" | "permissive-content-transformations";
@@ -168,7 +171,7 @@ export function shellQuote(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
-export function displayCommand(args: string[], fmPath = "/usr/bin/fm"): string {
-  const exe = fmPath === "/usr/bin/fm" ? "fm" : fmPath;
+export function displayCommand(args: string[], fmPath = DEFAULT_FM_PATH): string {
+  const exe = fmPath === DEFAULT_FM_PATH ? "fm" : fmPath;
   return [exe, ...args].map(shellQuote).join(" ");
 }

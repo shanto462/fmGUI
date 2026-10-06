@@ -1,15 +1,16 @@
 // Chat tool picker: lists every catalog tool with a switch that saves to the
-// app config. OWNER: agent "ui-chat".
+// app config.
 
 import { ArrowRight, ShieldAlert } from "lucide-react";
 import { useState } from "react";
-import { Badge, Button, Callout, Modal, Spinner, Toggle, formatNumber } from "../../components/ui";
+import { Badge, Button, Callout, Modal, Spinner, Toggle } from "../../components/ui";
+import { formatNumber } from "../../lib/format";
 import { useApp } from "../../lib/store";
 import type { AppConfig, ToolInfo, ToolSource } from "../../lib/types";
 import { SourceIcon } from "./StepCard";
 
 /** Writes the enabled flag for one catalog tool into the config draft. False if the tool is unknown. */
-export function applyToolEnabled(draft: AppConfig, tool: ToolInfo, on: boolean): boolean {
+function applyToolEnabled(draft: AppConfig, tool: ToolInfo, on: boolean): boolean {
   const [kind, ...rest] = tool.id.split(":");
   if (kind === "builtin" || (tool.source === "builtin" && rest.length === 0)) {
     const key = rest.join(":") || tool.name;
@@ -49,7 +50,7 @@ function groupTools(tools: ToolInfo[]): { key: string; title: string; tools: Too
   for (const t of tools) {
     const order = GROUP_ORDER.indexOf(t.source);
     const key = t.source === "mcp" ? `mcp:${t.sourceLabel}` : t.source;
-    const title = t.source === "mcp" ? `MCP: ${t.sourceLabel || "server"}` : GROUP_TITLE[t.source] ?? t.source;
+    const title = t.source === "mcp" ? `MCP: ${t.sourceLabel || "server"}` : (GROUP_TITLE[t.source] ?? t.source);
     if (!groups.has(key)) groups.set(key, { key, title, order: order === -1 ? 9 : order, tools: [] });
     groups.get(key)!.tools.push(t);
   }

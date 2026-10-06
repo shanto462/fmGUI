@@ -1,5 +1,5 @@
 // Code snippets, "Try it" presets and the compatibility table for the API Server
-// page. Facts tested against `fm serve` on macOS 27.0.1. OWNER: agent "ui-build".
+// page. Facts tested against `fm serve` on macOS 27.0.1.
 
 import { shellQuote } from "../../lib/fmArgs";
 
@@ -141,7 +141,8 @@ export const ENDPOINTS: Endpoint[] = [
 /** What to copy for an endpoint: a URL (TCP) or a curl command (socket). */
 export function endpointCopyText(t: Target, e: Endpoint): string {
   if (t.mode === "socket") {
-    const post = e.method === "POST" ? ` -H "Content-Type: application/json" -d ${shellQuote(JSON.stringify(CHAT_BODY))}` : "";
+    const post =
+      e.method === "POST" ? ` -H "Content-Type: application/json" -d ${shellQuote(JSON.stringify(CHAT_BODY))}` : "";
     return `curl --unix-socket ${shellQuote(t.socketPath)} http://localhost${e.path}${post}`;
   }
   return `${t.baseUrl}${e.path}`;
@@ -244,7 +245,7 @@ export type CompatStatus = "works" | "rejected" | "ignored" | "note";
 
 export const COMPAT: { feature: string; status: CompatStatus; note: string }[] = [
   { feature: "messages", status: "works", note: "Roles system, user, assistant and tool." },
-  { feature: "stream", status: "works", note: "Defaults to true. Send \"stream\": false for one JSON reply." },
+  { feature: "stream", status: "works", note: 'Defaults to true. Send "stream": false for one JSON reply.' },
   {
     feature: "Errors while streaming",
     status: "note",
@@ -260,7 +261,7 @@ export const COMPAT: { feature: string; status: CompatStatus; note: string }[] =
   {
     feature: "max_completion_tokens",
     status: "works",
-    note: "Cuts the reply at N tokens. finish_reason is still \"stop\", not \"length\".",
+    note: 'Cuts the reply at N tokens. finish_reason is still "stop", not "length".',
   },
   { feature: "temperature, seed", status: "works", note: "temperature 0 or a fixed seed gives repeatable answers." },
   { feature: "max_tokens", status: "ignored", note: "Accepted, no effect. Use max_completion_tokens." },
@@ -278,6 +279,6 @@ export const COMPAT: { feature: string; status: CompatStatus; note: string }[] =
   {
     feature: "tools, tool_choice",
     status: "ignored",
-    note: "Accepted, but tool_calls never come back on macOS 27.0.1. tool_choice \"required\" gives HTTP 500.",
+    note: 'Accepted, but tool_calls never come back on macOS 27.0.1. tool_choice "required" gives HTTP 500.',
   },
 ];

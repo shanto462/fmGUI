@@ -1,11 +1,13 @@
-// Settings: defaults for new chats. OWNER: agent "ui-shell".
+// Settings: defaults for new chats.
 
 import { Footprints, MessageSquareText, Thermometer, Wrench } from "lucide-react";
 import { useEffect, useRef } from "react";
-import { Section, Select, TextArea, Toggle, formatNumber } from "../../components/ui";
+import { Section, Select, TextArea, Toggle } from "../../components/ui";
+import { estimateTokens, formatNumber } from "../../lib/format";
 import type { AppConfig } from "../../lib/types";
-import { useSaveConfig } from "../overview/shared";
-import { SettingRow, useDraft } from "./SettingRow";
+import { useSaveConfig } from "../overview/hooks";
+import { SettingRow } from "./SettingRow";
+import { useDraft } from "./useDraft";
 
 const STEP_OPTIONS = Array.from({ length: 8 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }));
 const DEFAULT_TEMPERATURE = 0.5;
@@ -38,7 +40,7 @@ export default function ChatSection(props: { config: AppConfig }) {
   };
 
   const customTemp = d.temperature != null;
-  const approxTokens = Math.ceil(instructions.trim().length / 4);
+  const approxTokens = estimateTokens(instructions.trim());
 
   return (
     <Section title="Chat defaults">
@@ -58,7 +60,8 @@ export default function ChatSection(props: { config: AppConfig }) {
             onBlur={saveInstructions}
           />
           <div className="xsmall muted">
-            {instructions.trim() ? `About ${formatNumber(approxTokens)} tokens. ` : ""}Saved when you click outside the box.
+            {instructions.trim() ? `About ${formatNumber(approxTokens)} tokens. ` : ""}Saved when you click outside the
+            box.
           </div>
         </SettingRow>
 

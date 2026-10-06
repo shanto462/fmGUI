@@ -1,28 +1,20 @@
-// Small helpers shared by the Chat and CLI Sessions views. OWNER: agent "ui-chat".
+// Small helpers shared by the Chat and CLI Sessions views.
 
-import { open } from "@tauri-apps/plugin-dialog";
 import { newId } from "../../lib/api";
+import { pickFiles } from "../../lib/dialogs";
 import type { ChatMessage } from "../../lib/types";
 
-export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "heic", "gif", "webp", "tiff"];
+/** Image types Chat and CLI Sessions accept. */
+const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "heic", "gif", "webp", "tiff"];
 
 export function isImagePath(path: string): boolean {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   return IMAGE_EXTENSIONS.includes(ext);
 }
 
-export function basename(path: string): string {
-  return path.split("/").pop() ?? path;
-}
-
 /** Opens the system file picker for images. Returns [] when the user cancels. */
-export async function pickImagePaths(): Promise<string[]> {
-  const picked = await open({
-    multiple: true,
-    filters: [{ name: "Images", extensions: IMAGE_EXTENSIONS }],
-  });
-  if (!picked) return [];
-  return Array.isArray(picked) ? picked : [picked];
+export function pickImagePaths(): Promise<string[]> {
+  return pickFiles({ name: "Images", extensions: IMAGE_EXTENSIONS });
 }
 
 export function readFileAsDataUrl(file: File): Promise<string> {
@@ -38,22 +30,6 @@ export function readFileAsDataUrl(file: File): Promise<string> {
 export function imageFiles(list: FileList | null | undefined): File[] {
   if (!list) return [];
   return Array.from(list).filter((f) => f.type.startsWith("image/"));
-}
-
-export function prettyJson(value: unknown): string {
-  if (value === undefined || value === null) return "{}";
-  if (typeof value === "string") {
-    try {
-      return JSON.stringify(JSON.parse(value), null, 2);
-    } catch {
-      return value;
-    }
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }
 
 export function isEmptyArgs(value: unknown): boolean {
@@ -79,7 +55,3 @@ export function blankMessage(role: ChatMessage["role"], patch: Partial<ChatMessa
 }
 
 export const isTempId = (id: string) => id.startsWith("temp-");
-
-export function pluralize(n: number, one: string, many = `${one}s`): string {
-  return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
-}

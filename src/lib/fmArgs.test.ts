@@ -1,4 +1,4 @@
-// Unit tests for the fm argument builders. OWNER: agent "ui-build".
+// Unit tests for the fm argument builders.
 // Flags were checked against `fm <command> --help` on macOS 27.0.1.
 
 import { describe, expect, it } from "vitest";
@@ -303,13 +303,20 @@ describe("shellQuote and displayCommand", () => {
   });
 });
 
-describe("fixes for issues found by the UI agents", () => {
+describe("edge cases", () => {
   it("rejects a property that is both a value and an object", () => {
     const d = {
       rootName: "Place",
       properties: [
         { id: "1", name: "address", type: "string" as const, isArray: false, isOptional: false, description: "" },
-        { id: "2", name: "address.street", type: "string" as const, isArray: false, isOptional: false, description: "" },
+        {
+          id: "2",
+          name: "address.street",
+          type: "string" as const,
+          isArray: false,
+          isOptional: false,
+          description: "",
+        },
       ],
     };
     expect(validateSchema(d).some((p) => p.includes("as a value and as an object"))).toBe(true);

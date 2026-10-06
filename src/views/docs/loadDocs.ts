@@ -1,4 +1,4 @@
-// Docs are bundled at build time from the repo's docs/ folder. OWNER: agent "ui-build".
+// Docs are bundled at build time from the repo's docs/ folder.
 
 export interface DocHeading {
   level: number;
@@ -71,6 +71,10 @@ export function snippetAround(doc: Doc, query: string, size = 90): string | null
   const i = doc.lower.indexOf(query);
   if (i < 0) return null;
   const start = Math.max(0, i - 30);
-  const raw = doc.content.slice(start, start + size).replace(/[#*`>_|]/g, "").replace(/\s+/g, " ").trim();
+  const raw = doc.content
+    .slice(start, start + size)
+    .replace(/[#*`>_|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
   return `${start > 0 ? "…" : ""}${raw}…`;
 }

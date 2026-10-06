@@ -1,4 +1,4 @@
-// Overview: a dashboard of the model, the app services and quick actions. OWNER: agent "ui-shell".
+// Overview: a dashboard of the model, the app services and quick actions.
 
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -21,7 +21,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Badge, Button, Page, StatusDot, formatNumber } from "../components/ui";
+import { Badge, Button, Page, StatusDot } from "../components/ui";
 import {
   chatCreate,
   chatsList,
@@ -37,9 +37,13 @@ import {
   toolsCatalog,
 } from "../lib/api";
 import { displayCommand } from "../lib/fmArgs";
+import { formatNumber } from "../lib/format";
+import { tildePath } from "../lib/paths";
 import { useApp, type Route } from "../lib/store";
 import type { ChatSummary, CliSession, McpServerStatus, PublicServerStatus, Skill, ToolInfo } from "../lib/types";
-import { IconTile, macosLabel, modelState, useEngine, type TileColor } from "./overview/shared";
+import { useEngine } from "./overview/hooks";
+import { IconTile, type TileColor } from "./overview/shared";
+import { macosLabel, modelState } from "./overview/status";
 import "./OverviewView.css";
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -65,9 +69,9 @@ export default function OverviewView() {
   const status = useApp((s) => s.status);
   const statusLoading = useApp((s) => s.statusLoading);
   const config = useApp((s) => s.config);
+  const home = useApp((s) => s.paths?.homeDir);
   const refreshStatus = useApp((s) => s.refreshStatus);
   const navigate = useApp((s) => s.navigate);
-  const updateConfig = useApp((s) => s.updateConfig);
   const toast = useApp((s) => s.toast);
   const engine = useEngine();
 
@@ -76,17 +80,21 @@ export default function OverviewView() {
   const [creatingChat, setCreatingChat] = useState(false);
   const [startingServer, setStartingServer] = useState(false);
 
-  const loadData = useCallback(async () => {
-    const [server, chats, sessions, tools, mcp, skills] = await Promise.all([
-      settle(publicServerStatus()),
-      settle(chatsList()),
-      settle(cliSessionsList()),
-      settle(toolsCatalog()),
-      settle(mcpStatuses()),
-      settle(skillsList()),
-    ]);
-    setData({ server, chats, sessions, tools, mcp, skills });
-  }, []);
+  // Never rejects: each part keeps its own error.
+  const loadData = useCallback(
+    () =>
+      Promise.all([
+        settle(publicServerStatus()),
+        settle(chatsList()),
+        settle(cliSessionsList()),
+        settle(toolsCatalog()),
+        settle(mcpStatuses()),
+        settle(skillsList()),
+      ]).then(([server, chats, sessions, tools, mcp, skills]) =>
+        setData({ server, chats, sessions, tools, mcp, skills }),
+      ),
+    [],
+  );
 
   const refresh = async () => {
     setRefreshing(true);
@@ -110,6 +118,7 @@ export default function OverviewView() {
         if (alive) unlisten = fns;
         else fns.forEach((f) => f());
       })
+      // Live updates are optional: Refresh still loads everything.
       .catch(() => undefined);
     return () => {
       alive = false;
@@ -117,14 +126,15 @@ export default function OverviewView() {
     };
   }, []);
 
-  const model = modelState(status, statusLoading);
+  const model = modelState(status, statusLoading, home);
   const contextSize = status?.contextSize || config?.contextSize || 8192;
   const server = data?.server.ok ? data.server.value : null;
   const eng = engine.status;
   let serverDetail: ReactNode = "Start it to use the model from other apps.";
   if (data && !data.server.ok) serverDetail = data.server.error;
-  else if (server?.running) serverDetail = <span className="mono">{server.url || server.socketPath}</span>;
-  else if (server?.lastError) serverDetail = server.lastError;
+  else if (server?.running) {
+    serverDetail = <span className="mono">{server.url || tildePath(server.socketPath ?? "", home)}</span>;
+  } else if (server?.lastError) serverDetail = server.lastError;
 
   const newChat = async () => {
     setCreatingChat(true);
@@ -153,12 +163,7 @@ export default function OverviewView() {
     }
   };
 
-  const runSetupAgain = async () => {
-    const saved = await updateConfig((c) => {
-      c.setupCompleted = false;
-    });
-    if (saved) navigate("setup");
-  };
+  const runSetupAgain = () => navigate("setup", { setupStep: 0 });
 
   const openLicense = async () => {
     try {
@@ -199,7 +204,13 @@ export default function OverviewView() {
           </div>
           <div className="ov-hero__cta">
             {model.ready ? (
-              <Button variant="primary" size="lg" icon={<MessageSquarePlus size={16} />} loading={creatingChat} onClick={newChat}>
+              <Button
+                variant="primary"
+                size="lg"
+                icon={<MessageSquarePlus size={16} />}
+                loading={creatingChat}
+                onClick={newChat}
+              >
                 New chat
               </Button>
             ) : (
@@ -233,7 +244,7 @@ export default function OverviewView() {
             label="fm tool"
             value={!status ? "Unknown" : status.binaryFound ? "Found" : "Not found"}
             tone={!status ? undefined : status.binaryFound ? "green" : "red"}
-            detail={<span className="mono">{status?.binaryPath || config?.fmPath}</span>}
+            detail={<span className="mono">{tildePath(status?.binaryPath || config?.fmPath || "", home)}</span>}
             action={
               <Button size="sm" onClick={() => navigate("settings")}>
                 Change
@@ -295,13 +306,7 @@ export default function OverviewView() {
         <section>
           <h3 className="section__title">Your stuff</h3>
           <div className="ov-stats">
-            <Stat
-              label="Chats"
-              route="chat"
-              result={data?.chats}
-              count={(v) => v.length}
-              onOpen={navigate}
-            />
+            <Stat label="Chats" route="chat" result={data?.chats} count={(v) => v.length} onOpen={navigate} />
             <Stat
               label="CLI sessions"
               route="sessions"
@@ -325,13 +330,7 @@ export default function OverviewView() {
               sub={(v) => `of ${v.length} ${v.length === 1 ? "server" : "servers"}`}
               onOpen={navigate}
             />
-            <Stat
-              label="Skills"
-              route="skills"
-              result={data?.skills}
-              count={(v) => v.length}
-              onOpen={navigate}
-            />
+            <Stat label="Skills" route="skills" result={data?.skills} count={(v) => v.length} onOpen={navigate} />
           </div>
         </section>
 
@@ -340,7 +339,12 @@ export default function OverviewView() {
           <h3 className="section__title">Quick actions</h3>
           <div className="ov-actions">
             <Action icon={<MessageSquarePlus />} color="blue" label="New chat" busy={creatingChat} onClick={newChat} />
-            <Action icon={<TerminalSquare />} color="indigo" label="Playground" onClick={() => navigate("playground")} />
+            <Action
+              icon={<TerminalSquare />}
+              color="indigo"
+              label="Playground"
+              onClick={() => navigate("playground")}
+            />
             <Action icon={<Braces />} color="teal" label="Schema Builder" onClick={() => navigate("schema")} />
             <Action
               icon={<Plug />}
@@ -357,7 +361,13 @@ export default function OverviewView() {
             {server?.running ? (
               <Action icon={<Radio />} color="green" label="Open API server" onClick={() => navigate("server")} />
             ) : (
-              <Action icon={<Radio />} color="green" label="Start API server" busy={startingServer} onClick={startServer} />
+              <Action
+                icon={<Radio />}
+                color="green"
+                label="Start API server"
+                busy={startingServer}
+                onClick={startServer}
+              />
             )}
             <Action icon={<Wand2 />} color="pink" label="Run setup again" onClick={runSetupAgain} />
             <Action icon={<BookOpen />} color="gray" label="Read the docs" onClick={() => navigate("docs")} />
@@ -452,7 +462,9 @@ function Stat<T>(props: {
     >
       <span className="ov-stat__num">{!r ? "…" : r.ok ? formatNumber(props.count(r.value)) : "?"}</span>
       <span className="ov-stat__label">{props.label}</span>
-      <span className="ov-stat__sub">{r?.ok && props.sub ? props.sub(r.value) : r && !r.ok ? "Not available" : " "}</span>
+      <span className="ov-stat__sub">
+        {r?.ok && props.sub ? props.sub(r.value) : r && !r.ok ? "Not available" : " "}
+      </span>
     </button>
   );
 }

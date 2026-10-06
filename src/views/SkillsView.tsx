@@ -1,9 +1,8 @@
 // Skills page: SKILL.md skills, their modes, editor, import and the new skill wizard.
-// OWNER: agent "ui-extend".
 
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Download, FolderOpen, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Markdown } from "../components/Markdown";
 import {
   Badge,
@@ -17,15 +16,19 @@ import {
   Segmented,
   Spinner,
   TextInput,
-  cx,
-  formatNumber,
 } from "../components/ui";
 import { errorMessage, skillDelete, skillTokenCount } from "../lib/api";
-import { useApp } from "../lib/store";
+import { cx } from "../lib/cx";
+import { formatNumber } from "../lib/format";
+import { tildePath } from "../lib/paths";
+import { pressable } from "../lib/pressable";
+import { useApp, useHandoff } from "../lib/store";
 import type { AppConfig, Skill, SkillMode } from "../lib/types";
-import { ModeBadge, SkillEditorModal, SkillImportModal, SkillWizard, modeExplanation } from "./skills/parts";
+import { ModeBadge, ModeExplanation, SkillEditorModal, SkillImportModal, SkillWizard } from "./skills/parts";
 import { LARGE_SKILL_TOKENS } from "./skills/templates";
-import { ConfirmModal, ContextBudget, Tile, skillMode, useExtendData } from "./tools/shared";
+import { skillMode } from "./tools/helpers";
+import { ConfirmModal, ContextBudget, Tile } from "./tools/shared";
+import { useExtendData } from "./tools/useExtendData";
 
 export default function SkillsView() {
   const config = useApp((s) => s.config);
@@ -42,28 +45,21 @@ export default function SkillsView() {
 function SkillsPage({ config }: { config: AppConfig }) {
   const updateConfig = useApp((s) => s.updateConfig);
   const toast = useApp((s) => s.toast);
-  const takeHandoff = useApp((s) => s.takeHandoff);
+  const handoff = useHandoff();
   const { tools, skills, skillsError, reload } = useExtendData();
 
-  const [selected, setSelected] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [wizard, setWizard] = useState(false);
+  // Another page can open the "New skill" wizard right away.
+  const [wizard, setWizard] = useState(() => !!handoff.openWizard);
   const [importing, setImporting] = useState(false);
   const [editing, setEditing] = useState<Skill | null>(null);
   const [deleting, setDeleting] = useState<Skill | null>(null);
   const [exact, setExact] = useState<Record<string, number>>({});
   const [counting, setCounting] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (takeHandoff().openWizard) setWizard(true);
-  }, [takeHandoff]);
-
-  // Keep a valid selection.
-  useEffect(() => {
-    if (!skills) return;
-    if (skills.length === 0) setSelected(null);
-    else if (!selected || !skills.some((s) => s.name === selected)) setSelected(skills[0].name);
-  }, [skills, selected]);
+  // The picked skill, or the first one when nothing (or a deleted skill) is picked.
+  const selected = (picked && skills?.some((s) => s.name === picked) ? picked : skills?.[0]?.name) ?? null;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -100,7 +96,7 @@ function SkillsPage({ config }: { config: AppConfig }) {
       });
       toast(`Deleted "${skill.name}".`, "success");
       setDeleting(null);
-      setSelected(null);
+      setPicked(null);
       reload();
     } catch (err) {
       toast(errorMessage(err), "error");
@@ -121,7 +117,7 @@ function SkillsPage({ config }: { config: AppConfig }) {
       delete next[skill.name];
       return next;
     });
-    setSelected(skill.name);
+    setPicked(skill.name);
     reload();
   };
 
@@ -144,7 +140,12 @@ function SkillsPage({ config }: { config: AppConfig }) {
       <div className="split">
         <div className="split__list ext-skill-list">
           <div className="ext-skill-list__search">
-            <TextInput placeholder="Search skills" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <TextInput
+              placeholder="Search skills"
+              aria-label="Search skills"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
           </div>
           <div className="ext-skill-list__scroll">
             {skills === null ? (
@@ -160,7 +161,8 @@ function SkillsPage({ config }: { config: AppConfig }) {
                 <div
                   key={s.name}
                   className={cx("list-row", s.name === selected && "list-row--active")}
-                  onClick={() => setSelected(s.name)}
+                  aria-current={s.name === selected ? "true" : undefined}
+                  {...pressable(() => setPicked(s.name))}
                 >
                   <div className="row" style={{ gap: 6 }}>
                     <span className="list-row__title" style={{ flex: 1, minWidth: 0 }}>
@@ -204,8 +206,9 @@ function SkillsPage({ config }: { config: AppConfig }) {
                     </div>
                   }
                 >
-                  A skill is a set of instructions in a SKILL.md file, like Claude Skills. It teaches the model one kind of
-                  task, for example how to write your emails. Start from a template, or import skills you already have.
+                  A skill is a set of instructions in a SKILL.md file, like Claude Skills. It teaches the model one kind
+                  of task, for example how to write your emails. Start from a template, or import skills you already
+                  have.
                 </Empty>
               ) : current ? (
                 <SkillDetail
@@ -251,7 +254,7 @@ function SkillsPage({ config }: { config: AppConfig }) {
         <SkillImportModal
           onClose={() => setImporting(false)}
           onImported={(s) => {
-            setSelected(s.name);
+            setPicked(s.name);
             reload();
           }}
         />
@@ -261,8 +264,8 @@ function SkillsPage({ config }: { config: AppConfig }) {
           title={`Delete "${deleting.name}"?`}
           message={
             <>
-              This deletes the skill folder from fmGUI, including <span className="mono">SKILL.md</span> and any other files
-              in it. This cannot be undone.
+              This deletes the skill folder from fmGUI, including <span className="mono">SKILL.md</span> and any other
+              files in it. This cannot be undone.
             </>
           }
           confirmLabel="Delete"
@@ -288,6 +291,7 @@ function SkillDetail(props: {
   onReveal: () => void;
 }) {
   const { skill, mode } = props;
+  const home = useApp((s) => s.paths?.homeDir);
   const tokens = props.exact ?? skill.tokenEstimate;
   const share = tokens / props.contextSize;
   return (
@@ -333,11 +337,13 @@ function SkillDetail(props: {
               ]}
             />
           </div>
-          <div className="small">{modeExplanation(mode, tokens)}</div>
+          <div className="small">
+            <ModeExplanation mode={mode} tokens={tokens} />
+          </div>
           {mode === "always" && tokens > LARGE_SKILL_TOKENS && (
             <Callout tone="warning">
-              This skill is big. As "Always" it takes {Math.round(share * 100)}% of the context in every chat. "On demand" is
-              a better fit.
+              This skill is big. As "Always" it takes {Math.round(share * 100)}% of the context in every chat. "On
+              demand" is a better fit.
             </Callout>
           )}
         </div>
@@ -379,10 +385,14 @@ function SkillDetail(props: {
 
       <Section title="Instructions (SKILL.md)">
         <div className="card">
-          {skill.body.trim() ? <Markdown text={skill.body} /> : <div className="small muted">This skill has no instructions yet.</div>}
+          {skill.body.trim() ? (
+            <Markdown text={skill.body} />
+          ) : (
+            <div className="small muted">This skill has no instructions yet.</div>
+          )}
         </div>
         <div className="xsmall muted" style={{ marginTop: 8 }}>
-          <span className="mono selectable">{skill.path}</span>
+          <span className="mono selectable">{tildePath(skill.path, home)}</span>
           {skill.files.length > 0 && <> · Other files: {skill.files.join(", ")}</>}
         </div>
       </Section>

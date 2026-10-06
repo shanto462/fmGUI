@@ -1,11 +1,11 @@
-// Rename and delete sheets for CLI sessions. OWNER: agent "ui-chat".
+// Rename and delete sheets for CLI sessions.
 
 import { useState } from "react";
 import { Button, Callout, Field, Modal, TextInput } from "../../components/ui";
 import type { CliSession } from "../../lib/types";
 
 /** Same rules as fm: not empty, not "." or "..", no "/" or "\". */
-export function sessionNameProblem(raw: string, existing: string[], current: string): string | null {
+function sessionNameProblem(raw: string, existing: string[], current: string): string | null {
   const name = raw.trim();
   if (!name) return "Type a name.";
   if (name === "." || name === "..") return "This name is not allowed.";
@@ -14,7 +14,7 @@ export function sessionNameProblem(raw: string, existing: string[], current: str
   return null;
 }
 
-export function cleanSessionName(raw: string): string {
+function cleanSessionName(raw: string): string {
   return raw.trim().replace(/\.json$/i, "");
 }
 
@@ -108,8 +108,8 @@ export function DeleteSessionModal(props: {
     >
       <div className="stack">
         <p style={{ margin: 0 }}>
-          “{props.session.name}” will be deleted from ~/.fm/sessions. <span className="mono">fm chat</span> will not
-          be able to resume it. You cannot undo this.
+          “{props.session.name}” will be deleted from ~/.fm/sessions. <span className="mono">fm chat</span> will not be
+          able to resume it. You cannot undo this.
         </p>
         {error && <Callout tone="error">{error}</Callout>}
       </div>

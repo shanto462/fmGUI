@@ -1,5 +1,4 @@
 // Tools page: every tool the model can use, with prefs, tests and custom tools.
-// OWNER: agent "ui-extend".
 
 import {
   Calculator,
@@ -23,7 +22,7 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   Badge,
   Button,
@@ -37,15 +36,19 @@ import {
   Select,
   Spinner,
   Toggle,
-  cx,
 } from "../components/ui";
-import { customToolTest, toolTest, newId } from "../lib/api";
-import { useApp } from "../lib/store";
+import { customToolTest, newId, toolTest } from "../lib/api";
+import { cx } from "../lib/cx";
+import { tokensLabel } from "../lib/format";
+import { useApp, useHandoff } from "../lib/store";
 import type { AppConfig, Approval, CustomTool, ToolInfo, ToolTestResult } from "../lib/types";
 import { ToolTestPanel } from "./tools/ArgsForm";
-import { CustomToolWizard, KIND_INFO } from "./tools/CustomToolWizard";
 import { paramsSchema, uniqueName } from "./tools/customTool";
-import { APPROVAL_OPTIONS, ConfirmModal, ContextBudget, Tile, tokensLabel, toolTokenEstimate, useExtendData } from "./tools/shared";
+import { CustomToolWizard } from "./tools/CustomToolWizard";
+import { APPROVAL_OPTIONS, toolTokenEstimate } from "./tools/helpers";
+import { KIND_INFO } from "./tools/kinds";
+import { ConfirmModal, ContextBudget, Tile } from "./tools/shared";
+import { useExtendData } from "./tools/useExtendData";
 
 type Filter = "all" | "builtin" | "custom" | "mcp" | "skill";
 
@@ -73,17 +76,16 @@ function ToolsPage({ config }: { config: AppConfig }) {
   const updateConfig = useApp((s) => s.updateConfig);
   const toast = useApp((s) => s.toast);
   const navigate = useApp((s) => s.navigate);
-  const takeHandoff = useApp((s) => s.takeHandoff);
+  const handoff = useHandoff();
   const { tools, setTools, skills, toolsError, loading, reload } = useExtendData();
 
   const [filter, setFilter] = useState<Filter>("all");
-  const [wizard, setWizard] = useState<{ editing: CustomTool | null } | null>(null);
+  // Another page can open the "New tool" wizard right away.
+  const [wizard, setWizard] = useState<{ editing: CustomTool | null } | null>(() =>
+    handoff.openWizard ? { editing: null } : null,
+  );
   const [testing, setTesting] = useState<TestTarget | null>(null);
   const [deleting, setDeleting] = useState<CustomTool | null>(null);
-
-  useEffect(() => {
-    if (takeHandoff().openWizard) setWizard({ editing: null });
-  }, [takeHandoff]);
 
   const byId = useMemo(() => new Map((tools ?? []).map((t) => [t.id, t])), [tools]);
   const builtin = (tools ?? []).filter((t) => t.source === "builtin");
@@ -91,7 +93,9 @@ function ToolsPage({ config }: { config: AppConfig }) {
   const skillTools = (tools ?? []).filter((t) => t.source === "skill");
   const mcpGroups = useMemo(() => {
     const groups = new Map<string, ToolInfo[]>();
-    for (const t of mcpTools) groups.set(t.sourceLabel, [...(groups.get(t.sourceLabel) ?? []), t]);
+    for (const t of tools ?? []) {
+      if (t.source === "mcp") groups.set(t.sourceLabel, [...(groups.get(t.sourceLabel) ?? []), t]);
+    }
     return [...groups.entries()];
   }, [tools]);
 
@@ -247,7 +251,9 @@ function ToolsPage({ config }: { config: AppConfig }) {
     );
   });
 
-  const notConnected = config.mcpServers.filter((s) => s.enabled && !mcpTools.some((t) => t.id.startsWith(`mcp:${s.id}:`)));
+  const notConnected = config.mcpServers.filter(
+    (s) => s.enabled && !mcpTools.some((t) => t.id.startsWith(`mcp:${s.id}:`)),
+  );
 
   return (
     <Page
@@ -332,7 +338,12 @@ function ToolsPage({ config }: { config: AppConfig }) {
             title="Custom"
             actions={
               config.customTools.length > 0 && (
-                <Button size="sm" variant="plain" icon={<Plus size={13} />} onClick={() => setWizard({ editing: null })}>
+                <Button
+                  size="sm"
+                  variant="plain"
+                  icon={<Plus size={13} />}
+                  onClick={() => setWizard({ editing: null })}
+                >
                   New tool
                 </Button>
               )
@@ -400,7 +411,11 @@ function ToolsPage({ config }: { config: AppConfig }) {
                     {list.map((t) => (
                       <ToolRow
                         key={t.id}
-                        tile={<Tile tone="teal"><Plug size={15} /></Tile>}
+                        tile={
+                          <Tile tone="teal">
+                            <Plug size={15} />
+                          </Tile>
+                        }
                         info={t}
                         title={t.title || t.name}
                         name={t.name}
@@ -441,7 +456,11 @@ function ToolsPage({ config }: { config: AppConfig }) {
                 {skillTools.map((t) => (
                   <ToolRow
                     key={t.id}
-                    tile={<Tile tone="orange"><Sparkles size={15} /></Tile>}
+                    tile={
+                      <Tile tone="orange">
+                        <Sparkles size={15} />
+                      </Tile>
+                    }
                     info={t}
                     title={t.title || t.name}
                     name={t.name}
@@ -460,8 +479,8 @@ function ToolsPage({ config }: { config: AppConfig }) {
               </div>
             ) : (
               <div className="card small muted">
-                The model loads on-demand skills with a <span className="mono">use_skill</span> tool. It shows up here when
-                at least one skill is set to On demand.{" "}
+                The model loads on-demand skills with a <span className="mono">use_skill</span> tool. It shows up here
+                when at least one skill is set to On demand.{" "}
                 <button type="button" className="ext-link" onClick={() => navigate("skills")}>
                   Open Skills
                 </button>
@@ -490,8 +509,8 @@ function ToolsPage({ config }: { config: AppConfig }) {
         <Modal title={`Test "${testing.title}"`} onClose={() => setTesting(null)}>
           <div className="stack">
             <div className="small muted">
-              Runs <span className="mono">{testing.name}</span> directly with the arguments below. The model is not involved
-              and nothing asks for approval.
+              Runs <span className="mono">{testing.name}</span> directly with the arguments below. The model is not
+              involved and nothing asks for approval.
             </div>
             <ToolTestPanel schema={testing.schema} dangerous={testing.dangerous} run={testing.run} />
           </div>

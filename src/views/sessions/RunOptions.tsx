@@ -1,24 +1,14 @@
 // Options popover for continuing a CLI session: OCR/Barcode tools, greedy
-// sampling and use case. OWNER: agent "ui-chat".
+// sampling and use case.
 
 import { SlidersHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Chip, Select, Toggle, cx } from "../../components/ui";
+import { Chip, Select, Toggle } from "../../components/ui";
+import { cx } from "../../lib/cx";
 import type { BuiltinCliTool, UseCase } from "../../lib/fmArgs";
+import { countChanged, type CliRunOptions } from "./options";
 
-export interface CliRunOptions {
-  tools: BuiltinCliTool[];
-  greedy: boolean;
-  useCase: UseCase;
-}
-
-export const DEFAULT_CLI_OPTIONS: CliRunOptions = { tools: [], greedy: false, useCase: "general" };
-
-export function countChanged(o: CliRunOptions): number {
-  return o.tools.length + (o.greedy ? 1 : 0) + (o.useCase !== "general" ? 1 : 0);
-}
-
-export function OptionsFields(props: { value: CliRunOptions; onChange: (v: CliRunOptions) => void }) {
+function OptionsFields(props: { value: CliRunOptions; onChange: (v: CliRunOptions) => void }) {
   const o = props.value;
   const toggleTool = (t: BuiltinCliTool) =>
     props.onChange({ ...o, tools: o.tools.includes(t) ? o.tools.filter((x) => x !== t) : [...o.tools, t] });
@@ -58,7 +48,11 @@ export function OptionsFields(props: { value: CliRunOptions; onChange: (v: CliRu
   );
 }
 
-export function RunOptionsButton(props: { value: CliRunOptions; onChange: (v: CliRunOptions) => void; disabled?: boolean }) {
+export function RunOptionsButton(props: {
+  value: CliRunOptions;
+  onChange: (v: CliRunOptions) => void;
+  disabled?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const changed = countChanged(props.value);

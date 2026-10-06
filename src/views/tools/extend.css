@@ -1,4 +1,4 @@
-/* Styles shared by the Tools, MCP Servers and Skills pages. OWNER: agent "ui-extend".
+/* Styles shared by the Tools, MCP Servers and Skills pages.
    Every class is prefixed with "ext-" so it never clashes with other views. */
 
 /* ---------- Icon tiles (System Settings style) ---------- */
@@ -19,16 +19,36 @@
   height: 40px;
   border-radius: 10px;
 }
-.ext-tile--blue { background: var(--blue); }
-.ext-tile--green { background: var(--green); }
-.ext-tile--orange { background: var(--orange); }
-.ext-tile--red { background: var(--red); }
-.ext-tile--purple { background: var(--purple); }
-.ext-tile--pink { background: var(--pink); }
-.ext-tile--teal { background: var(--teal); }
-.ext-tile--gray { background: #8e8e93; }
-.ext-tile--dark { background: #3a3a3c; }
-.ext-tile--accent { background: var(--accent); }
+.ext-tile--blue {
+  background: var(--blue);
+}
+.ext-tile--green {
+  background: var(--green);
+}
+.ext-tile--orange {
+  background: var(--orange);
+}
+.ext-tile--red {
+  background: var(--red);
+}
+.ext-tile--purple {
+  background: var(--purple);
+}
+.ext-tile--pink {
+  background: var(--pink);
+}
+.ext-tile--teal {
+  background: var(--teal);
+}
+.ext-tile--gray {
+  background: #8e8e93;
+}
+.ext-tile--dark {
+  background: #3a3a3c;
+}
+.ext-tile--accent {
+  background: var(--accent);
+}
 
 /* ---------- Rows inside a .group ---------- */
 .ext-row {
@@ -113,7 +133,10 @@
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   cursor: default;
-  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s,
+    background 0.15s;
   min-width: 0;
 }
 .ext-choice:hover {

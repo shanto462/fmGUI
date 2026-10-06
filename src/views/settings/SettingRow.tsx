@@ -1,7 +1,7 @@
-// Row layout for grouped settings, plus a draft-value hook. OWNER: agent "ui-shell".
+// Row layout for grouped settings.
 
-import { useEffect, useState, type ReactNode } from "react";
-import { cx } from "../../components/ui";
+import type { ReactNode } from "react";
+import { cx } from "../../lib/cx";
 import { IconTile, type TileColor } from "../overview/shared";
 
 export function SettingRow(props: {
@@ -40,11 +40,4 @@ export function SettingRow(props: {
       {props.children != null && <div className="settings-row__control">{props.children}</div>}
     </div>
   );
-}
-
-/** Local copy of a saved value. It resets when the saved value changes. */
-export function useDraft<T>(value: T): [T, (v: T) => void] {
-  const [draft, setDraft] = useState(value);
-  useEffect(() => setDraft(value), [value]);
-  return [draft, setDraft];
 }

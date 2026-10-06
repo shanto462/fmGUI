@@ -1,14 +1,16 @@
 // "Try it": runs `fm respond --no-stream --schema <tmpfile>` with the generated
-// schema and shows the JSON reply. OWNER: agent "ui-build".
+// schema and shows the JSON reply.
 
 import { Play, Square } from "lucide-react";
 import { useState } from "react";
-import { Button, Callout, CodeBlock, CommandPreview, Field, TextArea, formatDuration } from "../../components/ui";
+import { Button, Callout, CodeBlock, CommandPreview, Field, TextArea } from "../../components/ui";
 import { errorMessage, fmCancel, fmRun, newId, saveTempText } from "../../lib/api";
-import { displayCommand, respondArgs } from "../../lib/fmArgs";
+import { DEFAULT_FM_PATH, displayCommand, respondArgs } from "../../lib/fmArgs";
+import { formatDuration, hashText, stripAnsi, tryPrettyJson } from "../../lib/format";
+import { useTicker } from "../../lib/hooks";
+import { joinPath } from "../../lib/paths";
 import { useApp } from "../../lib/store";
 import type { RunResult } from "../../lib/types";
-import { hashText, joinPath, stripAnsi, tryPrettyJson, useTicker } from "../playground/workbench";
 import { useSchemaBuilder } from "./store";
 
 export function TryIt(props: { json: string | null; rootName: string }) {
@@ -16,7 +18,7 @@ export function TryIt(props: { json: string | null; rootName: string }) {
   const setPrompt = useSchemaBuilder((s) => s.setTryPrompt);
   const paths = useApp((s) => s.paths);
   const config = useApp((s) => s.config);
-  const fmPath = config?.fmPath || "/usr/bin/fm";
+  const fmPath = config?.fmPath || DEFAULT_FM_PATH;
 
   const [runId, setRunId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState(0);
@@ -104,7 +106,9 @@ export function TryIt(props: { json: string | null; rootName: string }) {
         )}
       </div>
       <CommandPreview command={command} />
-      {!props.json && <div className="xsmall muted">Fix the schema first. The command runs once the JSON is ready.</div>}
+      {!props.json && (
+        <div className="xsmall muted">Fix the schema first. The command runs once the JSON is ready.</div>
+      )}
       {error && <Callout tone="error">{error}</Callout>}
       {failed && (
         <Callout tone="error">

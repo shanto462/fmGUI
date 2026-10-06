@@ -1,7 +1,7 @@
-// "New tool" / "Edit tool" wizard for custom tools. OWNER: agent "ui-extend".
+// "New tool" / "Edit tool" wizard for custom tools.
 
-import { Globe, Plus, RefreshCw, SquareTerminal, TriangleAlert, Workflow, X } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Plus, RefreshCw, TriangleAlert, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Badge,
   Button,
@@ -16,9 +16,9 @@ import {
   TextArea,
   TextInput,
   Toggle,
-  formatNumber,
 } from "../../components/ui";
 import { customToolTest, errorMessage, newId, shortcutsList } from "../../lib/api";
+import { estimateTokens, formatNumber } from "../../lib/format";
 import { useApp } from "../../lib/store";
 import type { CustomTool, ParamType } from "../../lib/types";
 import { ToolTestPanel } from "./ArgsForm";
@@ -39,15 +39,11 @@ import {
   type CustomKindType,
   type ToolDraft,
 } from "./customTool";
-import { ApprovalChoice, Block, ChoiceCard, FolderField, KeyValueEditor, Tile, toolTokenEstimate } from "./shared";
+import { toolTokenEstimate } from "./helpers";
+import { KIND_INFO } from "./kinds";
+import { ApprovalChoice, Block, ChoiceCard, FolderField, KeyValueEditor, Tile } from "./shared";
 
 const STEPS = ["Type", "Name", "Parameters", "Configure", "Test", "Save"];
-
-export const KIND_INFO: Record<CustomKindType, { title: string; icon: ReactNode; tone: string; label: string }> = {
-  shell: { title: "Shell command", icon: <SquareTerminal size={16} />, tone: "dark", label: "Shell" },
-  http: { title: "HTTP request", icon: <Globe size={16} />, tone: "blue", label: "HTTP" },
-  shortcut: { title: "Apple Shortcut", icon: <Workflow size={16} />, tone: "pink", label: "Shortcut" },
-};
 
 export function CustomToolWizard(props: {
   /** The tool to edit, or null for a new tool. */
@@ -83,25 +79,27 @@ export function CustomToolWizard(props: {
   draft.params.forEach((p, i) => {
     const n = p.name.trim();
     if (!n) paramErrors.push(`Parameter ${i + 1} needs a name.`);
-    else if (!PARAM_NAME_RE.test(n)) paramErrors.push(`"${n}": use lowercase letters, numbers and _, starting with a letter.`);
+    else if (!PARAM_NAME_RE.test(n))
+      paramErrors.push(`"${n}": use lowercase letters, numbers and _, starting with a letter.`);
     else if (paramNames.indexOf(n) !== i) paramErrors.push(`"${n}" is used twice.`);
   });
 
   const unknownPlaceholders = placeholders(draft).filter((p) => !paramNames.includes(p));
-  const unknownEnv = useMemo(() => {
-    const out = new Set<string>();
-    for (const m of draft.shell.command.matchAll(/\$\{?FM_ARG_([A-Z0-9_]+)/g)) {
-      if (!paramNames.some((p) => p.toUpperCase() === m[1])) out.add(`FM_ARG_${m[1]}`);
-    }
-    return [...out];
-  }, [draft.shell.command, paramNames.join(",")]);
+  const unknownEnv = [
+    ...new Set(
+      [...draft.shell.command.matchAll(/\$\{?FM_ARG_([A-Z0-9_]+)/g)]
+        .filter((m) => !paramNames.some((p) => p.toUpperCase() === m[1]))
+        .map((m) => `FM_ARG_${m[1]}`),
+    ),
+  ];
 
   const configError = (() => {
     if (draft.kind === "shell") {
       if (!draft.shell.command.trim()) return "Enter a command.";
     } else if (draft.kind === "http") {
       if (!/^https?:\/\/\S+$/.test(draft.http.url.trim())) return "Enter a URL that starts with https:// or http://.";
-      if (unknownPlaceholders.length) return `Unknown placeholder: {{${unknownPlaceholders[0]}}}. Add it as a parameter or remove it.`;
+      if (unknownPlaceholders.length)
+        return `Unknown placeholder: {{${unknownPlaceholders[0]}}}. Add it as a parameter or remove it.`;
     } else if (!draft.shortcut.shortcutName.trim()) return "Choose or type the name of a shortcut.";
     return null;
   })();
@@ -126,7 +124,10 @@ export function CustomToolWizard(props: {
         else d.customTools.push(tool);
       });
       if (saved) {
-        toast(props.editing ? `Saved "${tool.name}".` : `Added "${tool.name}". The model can use it in Chat now.`, "success");
+        toast(
+          props.editing ? `Saved "${tool.name}".` : `Added "${tool.name}". The model can use it in Chat now.`,
+          "success",
+        );
         props.onSaved(tool);
       }
     } finally {
@@ -221,7 +222,7 @@ export function CustomToolWizard(props: {
             }}
           />
         </Field>
-        <Field label="Description" hint={`${formatNumber(Math.ceil(draft.description.length / 4))} tokens`}>
+        <Field label="Description" hint={`${formatNumber(estimateTokens(draft.description))} tokens`}>
           <TextArea
             rows={3}
             value={draft.description}
@@ -230,9 +231,12 @@ export function CustomToolWizard(props: {
           />
         </Field>
         <Callout>
-          <b>The model reads this description to decide when to call your tool.</b> Say what the tool does and when to use
-          it. A good example: <i>"Get the current weather for a city. Use this when the user asks about the weather, the
-          temperature or rain."</i>
+          <b>The model reads this description to decide when to call your tool.</b> Say what the tool does and when to
+          use it. A good example:{" "}
+          <i>
+            "Get the current weather for a city. Use this when the user asks about the weather, the temperature or
+            rain."
+          </i>
         </Callout>
         {draft.description.trim().length > 0 && draft.description.trim().length < 25 && (
           <div className="small muted">Tip: a longer description helps the model pick the right tool.</div>
@@ -272,10 +276,17 @@ export function CustomToolWizard(props: {
                   onChange={(e) => setParam(i, { description: e.target.value })}
                 />
                 <label className="ext-check">
-                  <input type="checkbox" checked={p.required} onChange={(e) => setParam(i, { required: e.target.checked })} />
+                  <input
+                    type="checkbox"
+                    checked={p.required}
+                    onChange={(e) => setParam(i, { required: e.target.checked })}
+                  />
                   Required
                 </label>
-                <IconButton label="Remove parameter" onClick={() => patch({ params: draft.params.filter((_, j) => j !== i) })}>
+                <IconButton
+                  label="Remove parameter"
+                  onClick={() => patch({ params: draft.params.filter((_, j) => j !== i) })}
+                >
                   <X size={14} />
                 </IconButton>
               </div>
@@ -303,7 +314,8 @@ export function CustomToolWizard(props: {
             )}
             {draft.kind === "http" && (
               <>
-                Use them in the URL, headers or body as <span className="mono">{`{{${paramNames[0] ?? "city"}}}`}</span>.
+                Use them in the URL, headers or body as <span className="mono">{`{{${paramNames[0] ?? "city"}}}`}</span>
+                .
               </>
             )}
             {draft.kind === "shortcut" && (
@@ -316,7 +328,15 @@ export function CustomToolWizard(props: {
       </div>
     );
   } else if (step === 3) {
-    body = <ConfigureStep draft={draft} setDraft={setDraft} paramNames={paramNames} unknownPlaceholders={unknownPlaceholders} unknownEnv={unknownEnv} />;
+    body = (
+      <ConfigureStep
+        draft={draft}
+        setDraft={setDraft}
+        paramNames={paramNames}
+        unknownPlaceholders={unknownPlaceholders}
+        unknownEnv={unknownEnv}
+      />
+    );
   } else if (step === 4) {
     body = (
       <div className="stack">
@@ -336,11 +356,16 @@ export function CustomToolWizard(props: {
       <div className="stack" style={{ gap: 16 }}>
         <div>
           <div className="ext-h">When the model wants to use this tool</div>
-          <ApprovalChoice value={draft.approval} onChange={(approval) => patch({ approval })} recommendAsk={draft.kind === "shell"} />
+          <ApprovalChoice
+            value={draft.approval}
+            onChange={(approval) => patch({ approval })}
+            recommendAsk={draft.kind === "shell"}
+          />
         </div>
         {draft.kind === "shell" && draft.approval === "always" && (
           <Callout tone="warning">
-            Shell commands can change or delete files. With "Always allow" the model runs this command without asking you.
+            Shell commands can change or delete files. With "Always allow" the model runs this command without asking
+            you.
           </Callout>
         )}
         <div className="group">
@@ -378,7 +403,11 @@ export function CustomToolWizard(props: {
         <>
           <Button onClick={props.onClose}>Cancel</Button>
           <div className="spacer" />
-          {stepError && step > 0 && <span className="xsmall" style={{ color: "var(--red)" }}>{stepError}</span>}
+          {stepError && step > 0 && (
+            <span className="xsmall" style={{ color: "var(--red)" }}>
+              {stepError}
+            </span>
+          )}
           {step > 0 && <Button onClick={() => setStep(step - 1)}>Back</Button>}
           {step < STEPS.length - 1 ? (
             <Button
@@ -455,13 +484,17 @@ function ConfigureStep(props: {
         <Callout>
           <b>How arguments reach your command.</b> They are never pasted into the command text, so the model cannot
           inject extra commands. Read each one from an environment variable named{" "}
-          <span className="mono">FM_ARG_&lt;NAME&gt;</span>. All arguments also arrive as one JSON object on standard input
-          (stdin), for example for <span className="mono">jq</span>.
+          <span className="mono">FM_ARG_&lt;NAME&gt;</span>. All arguments also arrive as one JSON object on standard
+          input (stdin), for example for <span className="mono">jq</span>.
           {paramNames.length > 0 && (
             <div className="row row--wrap" style={{ marginTop: 8, gap: 6 }}>
               <span className="xsmall muted">Click to add:</span>
               {paramNames.map((p) => (
-                <Chip key={p} on={false} onClick={() => setShell({ command: `${draft.shell.command}"$${envVarName(p)}"` })}>
+                <Chip
+                  key={p}
+                  on={false}
+                  onClick={() => setShell({ command: `${draft.shell.command}"$${envVarName(p)}"` })}
+                >
                   <span className="mono">${envVarName(p)}</span>
                 </Chip>
               ))}
@@ -470,12 +503,13 @@ function ConfigureStep(props: {
         </Callout>
         {props.unknownEnv.length > 0 && (
           <Callout tone="warning">
-            The command uses {props.unknownEnv.map((v) => `$${v}`).join(", ")}, but there is no matching parameter. It will
-            be empty.
+            The command uses {props.unknownEnv.map((v) => `$${v}`).join(", ")}, but there is no matching parameter. It
+            will be empty.
           </Callout>
         )}
         <Callout tone="warning">
-          Never paste passwords, API keys or tokens into a command. They are saved in plain text in the app's config file.
+          Never paste passwords, API keys or tokens into a command. They are saved in plain text in the app's config
+          file.
         </Callout>
         <Block label="Working folder" hint="Optional. The folder the command runs in. Leave empty for the default.">
           <FolderField
@@ -501,10 +535,19 @@ function ConfigureStep(props: {
               Put parameters in the URL as <span className="mono">{"{{name}}"}</span>. They are URL-encoded for you.
             </>
           }
-          error={props.unknownPlaceholders.length ? `Unknown: ${props.unknownPlaceholders.map((p) => `{{${p}}}`).join(", ")}. Add a parameter with that name or remove it.` : undefined}
+          error={
+            props.unknownPlaceholders.length
+              ? `Unknown: ${props.unknownPlaceholders.map((p) => `{{${p}}}`).join(", ")}. Add a parameter with that name or remove it.`
+              : undefined
+          }
         >
           <div className="ext-editor-row">
-            <Select value={draft.http.method} onChange={(method) => setHttp({ method })} options={HTTP_METHODS} style={{ width: 100 }} />
+            <Select
+              value={draft.http.method}
+              onChange={(method) => setHttp({ method })}
+              options={HTTP_METHODS}
+              style={{ width: 100 }}
+            />
             <TextInput
               className="mono"
               style={{ flex: 1 }}
@@ -519,13 +562,21 @@ function ConfigureStep(props: {
           <div className="row row--wrap" style={{ gap: 6 }}>
             <span className="xsmall muted">Parameters (click to add to the URL):</span>
             {paramNames.map((p) => (
-              <Chip key={p} on={used.includes(p)} onClick={() => setHttp({ url: `${draft.http.url}{{${p}}}` })} title={used.includes(p) ? "Used" : "Not used yet"}>
+              <Chip
+                key={p}
+                on={used.includes(p)}
+                onClick={() => setHttp({ url: `${draft.http.url}{{${p}}}` })}
+                title={used.includes(p) ? "Used" : "Not used yet"}
+              >
                 <span className="mono">{`{{${p}}}`}</span>
               </Chip>
             ))}
           </div>
         )}
-        <Block label="Headers" hint="Optional. For example Accept: application/json. If an API needs a key, it is saved in plain text in the app's config file.">
+        <Block
+          label="Headers"
+          hint="Optional. For example Accept: application/json. If an API needs a key, it is saved in plain text in the app's config file."
+        >
           <KeyValueEditor
             rows={draft.http.headers}
             onChange={(headers) => setHttp({ headers })}
@@ -539,12 +590,17 @@ function ConfigureStep(props: {
           label="Body"
           hint={
             <>
-              Optional, usually empty for GET. For a JSON API: <span className="mono">{'{"city": "{{city}}"}'}</span>. Placeholders
-              in a JSON body are escaped for you.
+              Optional, usually empty for GET. For a JSON API: <span className="mono">{'{"city": "{{city}}"}'}</span>.
+              Placeholders in a JSON body are escaped for you.
             </>
           }
         >
-          <TextArea className="ext-mono-area" rows={4} value={draft.http.body} onChange={(e) => setHttp({ body: e.target.value })} />
+          <TextArea
+            className="ext-mono-area"
+            rows={4}
+            value={draft.http.body}
+            onChange={(e) => setHttp({ body: e.target.value })}
+          />
         </Field>
         {timeoutField(draft.http.timeoutSecs, (timeoutSecs) => setHttp({ timeoutSecs }))}
       </div>
@@ -563,24 +619,34 @@ function ShortcutConfig(props: {
   const { draft, setShortcut } = props;
   const [list, setList] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      setList(await shortcutsList());
-      setError(null);
-    } catch (err) {
-      setError(errorMessage(err));
-      setList((l) => l ?? []);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Never rejects: a failure shows as a hint, and the name can still be typed.
+  const fetchList = useCallback(
+    () =>
+      shortcutsList()
+        .then(
+          (names) => {
+            setList(names);
+            setError(null);
+          },
+          (err) => {
+            setError(errorMessage(err));
+            setList((l) => l ?? []);
+          },
+        )
+        .finally(() => setLoading(false)),
+    [],
+  );
 
   useEffect(() => {
-    load();
-  }, []);
+    void fetchList();
+  }, [fetchList]);
+
+  const load = () => {
+    setLoading(true);
+    void fetchList();
+  };
 
   const name = draft.shortcut.shortcutName;
   const q = name.trim().toLowerCase();
@@ -629,7 +695,10 @@ function ShortcutConfig(props: {
           input. Go back to add one named <span className="mono">input</span> if your shortcut needs text.
         </div>
       )}
-      <CodeBlock code={`shortcuts run ${JSON.stringify(name || "Shortcut Name")} --input-path <file with the input>`} copy={false} />
+      <CodeBlock
+        code={`shortcuts run ${JSON.stringify(name || "Shortcut Name")} --input-path <file with the input>`}
+        copy={false}
+      />
       {props.timeoutField(draft.shortcut.timeoutSecs, (timeoutSecs) => setShortcut({ timeoutSecs }))}
     </div>
   );

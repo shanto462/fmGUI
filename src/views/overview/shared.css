@@ -1,4 +1,4 @@
-/* Shared by Setup, Overview and Settings. OWNER: agent "ui-shell". */
+/* Shared by Setup, Overview and Settings. */
 
 .shell-tile {
   --tile: var(--accent);
@@ -8,7 +8,9 @@
   flex-shrink: 0;
   color: #fff;
   background: linear-gradient(180deg, color-mix(in srgb, var(--tile) 72%, #fff) 0%, var(--tile) 100%);
-  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.12);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
 .shell-tile svg {
@@ -38,27 +40,53 @@
   width: 60px;
   height: 60px;
   border-radius: 15px;
-  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 6px 18px color-mix(in srgb, var(--tile) 30%, transparent);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.08),
+    0 6px 18px color-mix(in srgb, var(--tile) 30%, transparent);
 }
 
 .shell-tile--xl {
   width: 76px;
   height: 76px;
   border-radius: 19px;
-  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 10px 28px color-mix(in srgb, var(--tile) 32%, transparent);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.08),
+    0 10px 28px color-mix(in srgb, var(--tile) 32%, transparent);
 }
 
-.shell-tile--accent { --tile: var(--accent); }
-.shell-tile--blue { --tile: var(--blue); }
-.shell-tile--indigo { --tile: color-mix(in srgb, var(--blue) 55%, var(--purple)); }
-.shell-tile--purple { --tile: var(--purple); }
-.shell-tile--pink { --tile: var(--pink); }
-.shell-tile--red { --tile: var(--red); }
-.shell-tile--orange { --tile: var(--orange); }
-.shell-tile--yellow { --tile: color-mix(in srgb, var(--yellow) 85%, var(--orange)); }
-.shell-tile--green { --tile: var(--green); }
-.shell-tile--teal { --tile: var(--teal); }
-.shell-tile--gray { --tile: #8e8e93; }
+.shell-tile--accent {
+  --tile: var(--accent);
+}
+.shell-tile--blue {
+  --tile: var(--blue);
+}
+.shell-tile--indigo {
+  --tile: color-mix(in srgb, var(--blue) 55%, var(--purple));
+}
+.shell-tile--purple {
+  --tile: var(--purple);
+}
+.shell-tile--pink {
+  --tile: var(--pink);
+}
+.shell-tile--red {
+  --tile: var(--red);
+}
+.shell-tile--orange {
+  --tile: var(--orange);
+}
+.shell-tile--yellow {
+  --tile: color-mix(in srgb, var(--yellow) 85%, var(--orange));
+}
+.shell-tile--green {
+  --tile: var(--green);
+}
+.shell-tile--teal {
+  --tile: var(--teal);
+}
+.shell-tile--gray {
+  --tile: #8e8e93;
+}
 
 /* Check rows */
 .shell-check {

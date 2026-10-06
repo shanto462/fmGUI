@@ -1,4 +1,4 @@
-// Starter schemas for the Schema Builder. OWNER: agent "ui-build".
+// Starter schemas for the Schema Builder.
 // Placeholder data only (no real people).
 
 import { newId } from "../../lib/api";

@@ -1,4 +1,4 @@
-// Custom tool draft model, validation and templates. OWNER: agent "ui-extend".
+// Custom tool draft model, validation and templates.
 
 import type { Approval, CustomTool, KeyValue, ParamType, ToolParam } from "../../lib/types";
 
@@ -53,7 +53,13 @@ export function draftFromTool(tool: CustomTool): ToolDraft {
   d.kind = k.type;
   if (k.type === "shell") d.shell = { command: k.command, cwd: k.cwd ?? "", timeoutSecs: k.timeoutSecs };
   if (k.type === "http")
-    d.http = { method: k.method, url: k.url, headers: k.headers.map((h) => ({ ...h })), body: k.body ?? "", timeoutSecs: k.timeoutSecs };
+    d.http = {
+      method: k.method,
+      url: k.url,
+      headers: k.headers.map((h) => ({ ...h })),
+      body: k.body ?? "",
+      timeoutSecs: k.timeoutSecs,
+    };
   if (k.type === "shortcut") d.shortcut = { shortcutName: k.shortcutName, timeoutSecs: k.timeoutSecs };
   return d;
 }
@@ -63,7 +69,12 @@ const clampTimeout = (n: number) => (Number.isFinite(n) ? Math.min(600, Math.max
 export function toolFromDraft(d: ToolDraft, id: string): CustomTool {
   let kind: CustomTool["kind"];
   if (d.kind === "shell") {
-    kind = { type: "shell", command: d.shell.command, cwd: d.shell.cwd.trim() || null, timeoutSecs: clampTimeout(d.shell.timeoutSecs) };
+    kind = {
+      type: "shell",
+      command: d.shell.command,
+      cwd: d.shell.cwd.trim() || null,
+      timeoutSecs: clampTimeout(d.shell.timeoutSecs),
+    };
   } else if (d.kind === "http") {
     kind = {
       type: "http",
@@ -74,7 +85,11 @@ export function toolFromDraft(d: ToolDraft, id: string): CustomTool {
       timeoutSecs: clampTimeout(d.http.timeoutSecs),
     };
   } else {
-    kind = { type: "shortcut", shortcutName: d.shortcut.shortcutName.trim(), timeoutSecs: clampTimeout(d.shortcut.timeoutSecs) };
+    kind = {
+      type: "shortcut",
+      shortcutName: d.shortcut.shortcutName.trim(),
+      timeoutSecs: clampTimeout(d.shortcut.timeoutSecs),
+    };
   }
   return {
     id,
@@ -148,7 +163,13 @@ const param = (name: string, description: string, type: ParamType = "string", re
   required,
 });
 
-function shellTemplate(name: string, description: string, command: string, params: ToolParam[] = [], approval: Approval = "ask") {
+function shellTemplate(
+  name: string,
+  description: string,
+  command: string,
+  params: ToolParam[] = [],
+  approval: Approval = "ask",
+) {
   return (): ToolDraft => {
     const d = emptyDraft();
     d.kind = "shell";

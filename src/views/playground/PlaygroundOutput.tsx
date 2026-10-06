@@ -1,5 +1,5 @@
 // Right pane of the Playground: command preview, Run / Stop, streamed output,
-// stderr, stats and the run history menu. OWNER: agent "ui-build".
+// stderr, stats and the run history menu.
 
 import { ChevronRight, Clock, Play, Square, TerminalSquare, Trash2 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -14,22 +14,15 @@ import {
   IconButton,
   Segmented,
   Spinner,
-  cx,
-  formatDuration,
-  formatNumber,
-  formatTime,
 } from "../../components/ui";
+import { cx } from "../../lib/cx";
+import { DEFAULT_FM_PATH } from "../../lib/fmArgs";
+import { formatDuration, formatNumber, formatTime, stripAnsi, truncateText, tryPrettyJson } from "../../lib/format";
+import { useTicker } from "../../lib/hooks";
+import { tildeText } from "../../lib/paths";
 import { useApp } from "../../lib/store";
-import {
-  formProblems,
-  previewCommand,
-  startRun,
-  stopRun,
-  usePlayground,
-  type OutputMode,
-  type PgRun,
-} from "./store";
-import { Stat, Toolbar, stripAnsi, truncateText, tryPrettyJson, useTicker } from "./workbench";
+import { formProblems, previewCommand, startRun, stopRun, usePlayground, type OutputMode, type PgRun } from "./store";
+import { Stat, Toolbar } from "./workbench";
 
 export function PlaygroundOutput() {
   const form = usePlayground((s) => s.form);
@@ -39,11 +32,12 @@ export function PlaygroundOutput() {
   const setOutputMode = usePlayground((s) => s.setOutputMode);
   const config = useApp((s) => s.config);
   const paths = useApp((s) => s.paths);
+  const home = paths?.homeDir;
   const toast = useApp((s) => s.toast);
   const navigate = useApp((s) => s.navigate);
 
   const tmpDir = paths?.tmpDir ?? null;
-  const fmPath = config?.fmPath || "/usr/bin/fm";
+  const fmPath = config?.fmPath || DEFAULT_FM_PATH;
   const command = previewCommand(form, tmpDir, fmPath);
   const problems = formProblems(form, tmpDir);
   const now = useTicker(running, 100);
@@ -91,7 +85,8 @@ export function PlaygroundOutput() {
         {running && current && (
           <span className="wb-running">
             <Spinner />
-            {current.stdout ? "Generating" : "Waiting for the model"} · {formatDuration(Math.max(0, now - current.startedAt))}
+            {current.stdout ? "Generating" : "Waiting for the model"} ·{" "}
+            {formatDuration(Math.max(0, now - current.startedAt))}
           </span>
         )}
         <div className="spacer" />
@@ -140,7 +135,13 @@ export function PlaygroundOutput() {
             shown above.
           </Empty>
         ) : (
-          <RunOutput run={current} running={running} mode={outputMode} pretty={pretty} onSetup={() => navigate("setup")} />
+          <RunOutput
+            run={current}
+            running={running}
+            mode={outputMode}
+            pretty={pretty}
+            onSetup={() => navigate("setup")}
+          />
         )}
       </div>
 
@@ -150,7 +151,7 @@ export function PlaygroundOutput() {
             <ChevronRight size={12} />
             stderr · {current.stderr.trim().split("\n").length} lines
           </summary>
-          <pre>{stripAnsi(current.stderr).trim()}</pre>
+          <pre>{tildeText(stripAnsi(current.stderr).trim(), home)}</pre>
         </details>
       )}
 
@@ -159,8 +160,15 @@ export function PlaygroundOutput() {
   );
 }
 
-function RunOutput(props: { run: PgRun; running: boolean; mode: OutputMode; pretty: string | null; onSetup: () => void }) {
+function RunOutput(props: {
+  run: PgRun;
+  running: boolean;
+  mode: OutputMode;
+  pretty: string | null;
+  onSetup: () => void;
+}) {
   const { run, running, mode, pretty } = props;
+  const home = useApp((s) => s.paths?.homeDir);
   const res = run.result;
   const failed = res && !res.cancelled && res.exitCode !== 0;
   const caret = running ? <span className="wb-caret" /> : null;
@@ -170,7 +178,7 @@ function RunOutput(props: { run: PgRun; running: boolean; mode: OutputMode; pret
       {run.error && (
         <div className="wb__pad">
           <Callout tone="error">
-            <strong>Could not run fm.</strong> {run.error}
+            <strong>Could not run fm.</strong> {tildeText(run.error, home)}
           </Callout>
         </div>
       )}
@@ -179,7 +187,7 @@ function RunOutput(props: { run: PgRun; running: boolean; mode: OutputMode; pret
           <Callout tone="error">
             <div className="stack" style={{ gap: 6 }}>
               <div>
-                <strong>fm exited with code {res.exitCode}.</strong> {res.error ?? ""}
+                <strong>fm exited with code {res.exitCode}.</strong> {tildeText(res.error ?? "", home)}
               </div>
               {res.exitCode === 69 && (
                 <div>
@@ -200,7 +208,9 @@ function RunOutput(props: { run: PgRun; running: boolean; mode: OutputMode; pret
 
       {!run.stdout && running ? (
         <div className="wb-output muted">
-          {run.form.stream ? "Waiting for the first token…" : "Streaming is off. The reply appears when it is complete."}
+          {run.form.stream
+            ? "Waiting for the first token…"
+            : "Streaming is off. The reply appears when it is complete."}
           {caret}
         </div>
       ) : !run.stdout ? (
@@ -300,10 +310,22 @@ function HistoryMenu() {
               </IconButton>
             )}
           </div>
-          {history.length === 0 && <div className="xsmall muted" style={{ padding: "4px 9px 8px" }}>No runs yet. The last 10 runs stay here until you quit the app.</div>}
+          {history.length === 0 && (
+            <div className="xsmall muted" style={{ padding: "4px 9px 8px" }}>
+              No runs yet. The last 10 runs stay here until you quit the app.
+            </div>
+          )}
           {history.map((h) => {
             const res = h.result;
-            const tone = h.error ? "red" : !res ? undefined : res.cancelled ? "orange" : res.exitCode === 0 ? "green" : "red";
+            const tone = h.error
+              ? "red"
+              : !res
+                ? undefined
+                : res.cancelled
+                  ? "orange"
+                  : res.exitCode === 0
+                    ? "green"
+                    : "red";
             return (
               <button
                 key={h.id}
@@ -325,7 +347,9 @@ function HistoryMenu() {
                     {h.form.images.length ? ` · ${h.form.images.length} image(s)` : ""}
                   </div>
                 </div>
-                {tone && <Badge tone={tone}>{h.error ? "error" : res?.cancelled ? "stopped" : `exit ${res?.exitCode}`}</Badge>}
+                {tone && (
+                  <Badge tone={tone}>{h.error ? "error" : res?.cancelled ? "stopped" : `exit ${res?.exitCode}`}</Badge>
+                )}
               </button>
             );
           })}

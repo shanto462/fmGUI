@@ -1,42 +1,40 @@
 // Small read-only preview of a transcript file (used for --resume and --transcript).
-// OWNER: agent "ui-build".
 
 import { useEffect, useState } from "react";
 import { Spinner } from "../../components/ui";
 import { errorMessage, transcriptRead } from "../../lib/api";
+import { truncateText } from "../../lib/format";
 import type { ParsedTranscript } from "../../lib/types";
-import { truncateText } from "./workbench";
 import "./playground.css";
 
 export function TranscriptPreview(props: { path: string; maxMessages?: number }) {
-  const [data, setData] = useState<ParsedTranscript | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  // The last result, with the path it belongs to. A result for another path is ignored.
+  const [loaded, setLoaded] = useState<{ path: string; data: ParsedTranscript | null; error: string | null } | null>(
+    null,
+  );
 
   useEffect(() => {
-    let alive = true;
-    setData(null);
-    setError(null);
     if (!props.path) return;
-    setLoading(true);
-    transcriptRead(props.path)
-      .then((t) => alive && setData(t))
-      .catch((err) => alive && setError(errorMessage(err)))
-      .finally(() => alive && setLoading(false));
+    const path = props.path;
+    let alive = true;
+    transcriptRead(path)
+      .then((data) => alive && setLoaded({ path, data, error: null }))
+      .catch((err) => alive && setLoaded({ path, data: null, error: errorMessage(err) }));
     return () => {
       alive = false;
     };
   }, [props.path]);
 
   if (!props.path) return null;
-  if (loading) {
+  if (loaded?.path !== props.path) {
     return (
       <div className="row xsmall muted">
         <Spinner /> Reading transcript…
       </div>
     );
   }
-  if (error) return <div className="field__error">Could not read this transcript: {error}</div>;
+  if (loaded.error) return <div className="field__error">Could not read this transcript: {loaded.error}</div>;
+  const data = loaded.data;
   if (!data) return null;
 
   const max = props.maxMessages ?? 3;

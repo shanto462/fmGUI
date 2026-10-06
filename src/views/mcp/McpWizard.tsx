@@ -1,4 +1,4 @@
-// "Add MCP server" / "Edit MCP server" wizard. OWNER: agent "ui-extend".
+// "Add MCP server" / "Edit MCP server" wizard.
 
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { CircleCheck, CircleX, RefreshCw, SquareTerminal } from "lucide-react";
@@ -17,10 +17,11 @@ import {
   Steps,
   TextInput,
   Toggle,
-  formatDuration,
-  formatNumber,
 } from "../../components/ui";
 import { errorMessage, mcpTest, newId, openInTerminal, whichCommand } from "../../lib/api";
+import { shellQuote } from "../../lib/fmArgs";
+import { formatDuration, formatNumber, tokensLabel } from "../../lib/format";
+import { tildePath, tildeText } from "../../lib/paths";
 import { useApp } from "../../lib/store";
 import type { Approval, KeyValue, McpServerConfig, McpTestResult, McpToolSummary, McpTransport } from "../../lib/types";
 import {
@@ -31,11 +32,16 @@ import {
   KeyValueEditor,
   StringListEditor,
   Tile,
-  shellQuote,
-  tokensLabel,
-  toolTokenEstimate,
 } from "../tools/shared";
-import { MCP_TEMPLATES, REQUIREMENTS, argsWithFolder, templateCommand, type McpTemplate, type Requirement } from "./templates";
+import {
+  MCP_TEMPLATES,
+  REQUIREMENTS,
+  argsWithFolder,
+  templateCommand,
+  type McpTemplate,
+  type Requirement,
+} from "./templates";
+import { mcpToolTokens, transportLine } from "./transport";
 
 const STEPS = ["Server", "Requirements", "Configure", "Test", "Tools", "Save"];
 
@@ -53,13 +59,8 @@ interface Draft {
   approval: Approval;
 }
 
-type CheckState = { state: "checking" } | { state: "found"; path: string } | { state: "missing" } | { state: "error"; error: string };
-
-export const mcpToolTokens = (t: McpToolSummary) => toolTokenEstimate(t.inputSchema, t.description);
-
-export function transportLine(t: McpTransport): string {
-  return t.type === "http" ? t.url : [t.command, ...t.args].map(shellQuote).join(" ");
-}
+type CheckState =
+  { state: "checking" } | { state: "found"; path: string } | { state: "missing" } | { state: "error"; error: string };
 
 function draftFromConfig(c: McpServerConfig): Draft {
   const t = c.transport;
@@ -88,13 +89,18 @@ function tipsFor(text: string, stdio: boolean): string[] {
   const t = text.toLowerCase();
   const tips: string[] = [];
   if (/not found|enoent|no such file|command not found/.test(t))
-    tips.push("The program was not found. Go back to Requirements, or use the full path of the command (for example /opt/homebrew/bin/npx).");
+    tips.push(
+      "The program was not found. Go back to Requirements, or use the full path of the command (for example /opt/homebrew/bin/npx).",
+    );
   if (/timed out|timeout/.test(t))
     tips.push("The server took too long to answer. The first run downloads the package, so try again.");
-  if (/401|403|unauthori[sz]ed|forbidden/.test(t)) tips.push("The server refused the request. Check the Authorization header or token.");
+  if (/401|403|unauthori[sz]ed|forbidden/.test(t))
+    tips.push("The server refused the request. Check the Authorization header or token.");
   if (/404/.test(t)) tips.push("Check the URL. Many servers use a path that ends in /mcp.");
   if (/eacces|permission denied|operation not permitted/.test(t))
-    tips.push("macOS blocked access. Check the folder permissions, or allow fmGUI in System Settings > Privacy & Security.");
+    tips.push(
+      "macOS blocked access. Check the folder permissions, or allow fmGUI in System Settings > Privacy & Security.",
+    );
   if (/not a git repository|\.git/.test(t)) tips.push("The folder must be a Git repository (it has a .git folder).");
   if (/not implemented/.test(t)) tips.push("This part of fmGUI is not ready yet. Try again after an update.");
   if (tips.length === 0)
@@ -119,16 +125,31 @@ export function McpWizard(props: {
 }) {
   const updateConfig = useApp((s) => s.updateConfig);
   const toast = useApp((s) => s.toast);
+  const home = useApp((s) => s.paths?.homeDir);
   const editing = props.editing;
 
   const [step, setStep] = useState(editing ? 2 : 0);
   const [template, setTemplate] = useState<McpTemplate | null>(() =>
-    editing ? (MCP_TEMPLATES.find((t) => t.id === (editing.transport.type === "http" ? "remote" : "custom")) ?? null) : null,
+    editing
+      ? (MCP_TEMPLATES.find((t) => t.id === (editing.transport.type === "http" ? "remote" : "custom")) ?? null)
+      : null,
   );
   const [draft, setDraft] = useState<Draft>(() =>
     editing
       ? draftFromConfig(editing)
-      : { name: "", transport: "stdio", command: "", args: [], env: [], cwd: "", url: "", headers: [], folder: "", disabledTools: [], approval: "ask" },
+      : {
+          name: "",
+          transport: "stdio",
+          command: "",
+          args: [],
+          env: [],
+          cwd: "",
+          url: "",
+          headers: [],
+          folder: "",
+          disabledTools: [],
+          approval: "ask",
+        },
   );
   const patch = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }));
 
@@ -138,7 +159,8 @@ export function McpWizard(props: {
 
   const reqNames: string[] = useMemo(() => {
     if (template && template.needs.length) return template.needs;
-    if (draft.transport === "stdio" && draft.command.trim() && !draft.command.includes("/")) return [draft.command.trim()];
+    if (draft.transport === "stdio" && draft.command.trim() && !draft.command.includes("/"))
+      return [draft.command.trim()];
     return [];
   }, [template, draft.transport, draft.command]);
 
@@ -167,15 +189,16 @@ export function McpWizard(props: {
     }
   };
 
-  useEffect(() => {
-    if (step === 1) runChecks();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
-
   // ---------- build ----------
   const buildTransport = (): McpTransport =>
     draft.transport === "http"
-      ? { type: "http", url: draft.url.trim(), headers: draft.headers.filter((h) => h.key.trim() && h.value.trim()).map((h) => ({ key: h.key.trim(), value: h.value })) }
+      ? {
+          type: "http",
+          url: draft.url.trim(),
+          headers: draft.headers
+            .filter((h) => h.key.trim() && h.value.trim())
+            .map((h) => ({ key: h.key.trim(), value: h.value })),
+        }
       : {
           type: "stdio",
           command: draft.command.trim(),
@@ -224,14 +247,19 @@ export function McpWizard(props: {
     }
   };
 
-  useEffect(() => () => {
-    if (timer.current) window.clearInterval(timer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timer.current) window.clearInterval(timer.current);
+    },
+    [],
+  );
 
-  useEffect(() => {
-    if (step === 3 && testedSig !== sig && !testing) runTest();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
+  /** Moves to a step. The Requirements step checks the programs, and the Test step tests a changed config. */
+  const goStep = (next: number) => {
+    setStep(next);
+    if (next === 1) void runChecks();
+    if (next === 3 && testedSig !== sig && !testing) void runTest();
+  };
 
   const tools: McpToolSummary[] = result?.ok ? result.tools : (props.knownTools ?? []);
 
@@ -245,7 +273,8 @@ export function McpWizard(props: {
     if (nameError) return nameError;
     if (draft.transport === "stdio") {
       if (!draft.command.trim()) return "Enter the command that starts the server.";
-      if (template?.folder && !editing && !draft.folder.trim()) return `Choose the ${template.folder.label.toLowerCase()}.`;
+      if (template?.folder && !editing && !draft.folder.trim())
+        return `Choose the ${template.folder.label.toLowerCase()}.`;
     } else if (!/^https?:\/\/\S+$/.test(draft.url.trim())) return "Enter a URL that starts with https:// or http://.";
     return null;
   })();
@@ -319,8 +348,8 @@ export function McpWizard(props: {
     body = (
       <div className="stack" style={{ gap: 16 }}>
         <Callout>
-          <b>What is MCP?</b> The Model Context Protocol is an open standard for tool servers. A server is a small program
-          that gives the model new tools, like reading files or fetching web pages.
+          <b>What is MCP?</b> The Model Context Protocol is an open standard for tool servers. A server is a small
+          program that gives the model new tools, like reading files or fetching web pages.
         </Callout>
         <div className="ext-choices">
           {MCP_TEMPLATES.map((t) => (
@@ -381,20 +410,30 @@ export function McpWizard(props: {
                         <span className="ext-name">{n}</span>
                       </div>
                       {info && <div className="ext-row__desc">{info.why}</div>}
-                      {c.state === "found" && <div className="xsmall mono muted">{c.path}</div>}
-                      {c.state === "error" && <div className="xsmall" style={{ color: "var(--orange)" }}>Could not check: {c.error}</div>}
+                      {c.state === "found" && <div className="xsmall mono muted">{tildePath(c.path, home)}</div>}
+                      {c.state === "error" && (
+                        <div className="xsmall" style={{ color: "var(--orange)" }}>
+                          Could not check: {c.error}
+                        </div>
+                      )}
                       {c.state === "missing" && (
                         <div className="stack" style={{ gap: 6, marginTop: 6 }}>
                           <div className="small" style={{ color: "var(--red)" }}>
                             Not found.{" "}
-                            {info ? "Install it with this command in Terminal:" : "Install it, or use the full path of the program in the next step."}
+                            {info
+                              ? "Install it with this command in Terminal:"
+                              : "Install it, or use the full path of the program in the next step."}
                           </div>
                           {info && (
                             <div className="row">
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <CommandPreview command={info.install} />
                               </div>
-                              <Button size="sm" icon={<SquareTerminal size={13} />} onClick={() => runInTerminal(info.install)}>
+                              <Button
+                                size="sm"
+                                icon={<SquareTerminal size={13} />}
+                                onClick={() => runInTerminal(info.install)}
+                              >
                                 Open in Terminal
                               </Button>
                             </div>
@@ -409,7 +448,11 @@ export function McpWizard(props: {
             {brew?.state === "missing" && (
               <Callout tone="warning">
                 The install commands use Homebrew, and Homebrew is not installed. Install it first from{" "}
-                <button type="button" className="ext-link" onClick={() => openUrl("https://brew.sh").catch((e) => toast(errorMessage(e), "error"))}>
+                <button
+                  type="button"
+                  className="ext-link"
+                  onClick={() => openUrl("https://brew.sh").catch((e) => toast(errorMessage(e), "error"))}
+                >
                   brew.sh
                 </button>
                 , then run the command above.
@@ -424,7 +467,9 @@ export function McpWizard(props: {
               </span>
             </div>
             {Object.values(checks).some((c) => c.state === "missing") && (
-              <div className="small muted">You can continue, but the server will not start until everything is installed.</div>
+              <div className="small muted">
+                You can continue, but the server will not start until everything is installed.
+              </div>
             )}
           </>
         )}
@@ -433,8 +478,17 @@ export function McpWizard(props: {
   } else if (step === 2) {
     body = (
       <div className="stack" style={{ gap: 16 }}>
-        <Field label="Name" error={draft.name && nameError ? nameError : undefined} hint="Shown in the app, for example Filesystem.">
-          <TextInput value={draft.name} autoFocus placeholder="My server" onChange={(e) => patch({ name: e.target.value })} />
+        <Field
+          label="Name"
+          error={draft.name && nameError ? nameError : undefined}
+          hint="Shown in the app, for example Filesystem."
+        >
+          <TextInput
+            value={draft.name}
+            autoFocus
+            placeholder="My server"
+            onChange={(e) => patch({ name: e.target.value })}
+          />
         </Field>
         <Block label="Connection">
           <div>
@@ -460,8 +514,16 @@ export function McpWizard(props: {
                 />
               </Block>
             )}
-            <Field label="Command" hint="The program that starts the server, for example npx or uvx. A full path also works.">
-              <TextInput className="mono" value={draft.command} placeholder="npx" onChange={(e) => patch({ command: e.target.value })} />
+            <Field
+              label="Command"
+              hint="The program that starts the server, for example npx or uvx. A full path also works."
+            >
+              <TextInput
+                className="mono"
+                value={draft.command}
+                placeholder="npx"
+                onChange={(e) => patch({ command: e.target.value })}
+              />
             </Field>
             <Block label="Arguments" hint="One per row. No quotes needed, even when a path has spaces.">
               <StringListEditor
@@ -477,10 +539,22 @@ export function McpWizard(props: {
               label="Environment variables"
               hint="Optional. For example an API key the server needs. Values are saved in plain text in the app's config file."
             >
-              <KeyValueEditor rows={draft.env} onChange={(env) => patch({ env })} keyPlaceholder="API_KEY" valuePlaceholder="value" addLabel="Add variable" monoKeys />
+              <KeyValueEditor
+                rows={draft.env}
+                onChange={(env) => patch({ env })}
+                keyPlaceholder="API_KEY"
+                valuePlaceholder="value"
+                addLabel="Add variable"
+                monoKeys
+              />
             </Block>
             <Block label="Working folder" hint="Optional. Leave empty for the default.">
-              <FolderField value={draft.cwd} onChange={(cwd) => patch({ cwd })} title="Choose the working folder" onError={(m) => toast(m, "error")} />
+              <FolderField
+                value={draft.cwd}
+                onChange={(cwd) => patch({ cwd })}
+                title="Choose the working folder"
+                onError={(m) => toast(m, "error")}
+              />
             </Block>
             {draft.command.trim() && (
               <Block label="The command fmGUI will run">
@@ -491,9 +565,17 @@ export function McpWizard(props: {
         ) : (
           <>
             <Field label="Server URL" hint="The Streamable HTTP endpoint, often ending in /mcp.">
-              <TextInput className="mono" value={draft.url} placeholder="https://example.com/mcp" onChange={(e) => patch({ url: e.target.value })} />
+              <TextInput
+                className="mono"
+                value={draft.url}
+                placeholder="https://example.com/mcp"
+                onChange={(e) => patch({ url: e.target.value })}
+              />
             </Field>
-            <Block label="Headers" hint="Optional. Many servers need a token, for example Authorization: Bearer <token>.">
+            <Block
+              label="Headers"
+              hint="Optional. Many servers need a token, for example Authorization: Bearer <token>."
+            >
               <KeyValueEditor
                 rows={draft.headers}
                 onChange={(headers) => patch({ headers })}
@@ -503,7 +585,9 @@ export function McpWizard(props: {
                 monoKeys
               />
             </Block>
-            <Callout tone="warning">Tokens are saved in plain text in the app's config file. Only use tokens you trust this Mac with.</Callout>
+            <Callout tone="warning">
+              Tokens are saved in plain text in the app's config file. Only use tokens you trust this Mac with.
+            </Callout>
           </>
         )}
       </div>
@@ -548,14 +632,16 @@ export function McpWizard(props: {
         {!testing && errText && (
           <>
             <Callout tone="error">
-              <b>The connection failed.</b> {errText}
+              <b>The connection failed.</b> {tildeText(errText, home)}
             </Callout>
             <div className="card">
               <div className="ext-h">Tips</div>
               <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
-                {tipsFor(`${errText}\n${(result?.stderrTail ?? []).join("\n")}`, draft.transport === "stdio").map((t) => (
-                  <li key={t}>{t}</li>
-                ))}
+                {tipsFor(`${errText}\n${(result?.stderrTail ?? []).join("\n")}`, draft.transport === "stdio").map(
+                  (t) => (
+                    <li key={t}>{t}</li>
+                  ),
+                )}
               </ul>
             </div>
             {result && result.stderrTail.length > 0 && (
@@ -585,7 +671,11 @@ export function McpWizard(props: {
     const total = props.baseTokens + serverTokens;
     const ratio = total / props.contextSize;
     const setOn = (name: string, on: boolean) =>
-      patch({ disabledTools: on ? draft.disabledTools.filter((n) => n !== name) : [...new Set([...draft.disabledTools, name])] });
+      patch({
+        disabledTools: on
+          ? draft.disabledTools.filter((n) => n !== name)
+          : [...new Set([...draft.disabledTools, name])],
+      });
     body = (
       <div className="stack" style={{ gap: 14 }}>
         <p className="ext-lead" style={{ margin: 0 }}>
@@ -656,12 +746,14 @@ export function McpWizard(props: {
             <dt>Name</dt>
             <dd>{draft.name}</dd>
             <dt>{t.type === "http" ? "URL" : "Command"}</dt>
-            <dd className="mono">{transportLine(t)}</dd>
+            <dd className="mono">{tildeText(transportLine(t), home)}</dd>
             <dt>Tools</dt>
             <dd>{tools.length ? `${on} of ${tools.length} on` : "Choose them after it connects"}</dd>
           </dl>
         </div>
-        <div className="small muted">After you save, fmGUI connects to the server. Its tools show up on the Tools page.</div>
+        <div className="small muted">
+          After you save, fmGUI connects to the server. Its tools show up on the Tools page.
+        </div>
       </div>
     );
   }
@@ -676,19 +768,23 @@ export function McpWizard(props: {
         <>
           <Button onClick={props.onClose}>Cancel</Button>
           <div className="spacer" />
-          {stepError && step > 0 && step !== 3 && <span className="xsmall" style={{ color: "var(--red)" }}>{stepError}</span>}
+          {stepError && step > 0 && step !== 3 && (
+            <span className="xsmall" style={{ color: "var(--red)" }}>
+              {stepError}
+            </span>
+          )}
           {step === 3 && !testing && !result?.ok && (
-            <Button variant="plain" onClick={() => setStep(5)}>
+            <Button variant="plain" onClick={() => goStep(5)}>
               Skip and save anyway
             </Button>
           )}
           {step > 0 && (
-            <Button onClick={() => setStep(step - 1)} disabled={testing}>
+            <Button onClick={() => goStep(step - 1)} disabled={testing}>
               Back
             </Button>
           )}
           {step < STEPS.length - 1 ? (
-            <Button variant="primary" disabled={!!stepError} onClick={() => setStep(step + 1)}>
+            <Button variant="primary" disabled={!!stepError} onClick={() => goStep(step + 1)}>
               Continue
             </Button>
           ) : (

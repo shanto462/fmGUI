@@ -1,13 +1,14 @@
 // Docs: the collected fm documentation from docs/*.md, bundled at build time.
-// OWNER: agent "ui-build". Links between docs ([x](06-tools.md)) switch the doc in the app.
+// Links between docs ([x](06-tools.md)) switch the doc in the app.
 
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ArrowLeft, ArrowRight, BookOpen, ExternalLink, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "../components/Markdown";
-import { Button, Empty, IconButton, Page, cx } from "../components/ui";
+import { Button, Empty, IconButton, Page } from "../components/ui";
 import { errorMessage } from "../lib/api";
-import { useApp } from "../lib/store";
+import { cx } from "../lib/cx";
+import { useApp, useHandoff } from "../lib/store";
 import { DOCS, findDoc, slugify, snippetAround, type Doc } from "./docs/loadDocs";
 import "./docs/docs.css";
 import "./playground/workbench.css";
@@ -17,12 +18,23 @@ const APPLE_DOCS = "https://developer.apple.com/documentation/foundationmodels";
 // Remember the open doc between page switches.
 let lastDocName: string | null = null;
 
+/** Scrolls the reader to a heading id like "#use-a-schema". */
+function scrollToAnchor(root: HTMLElement | null, anchor: string) {
+  const id = decodeURIComponent(anchor.replace(/^#/, ""));
+  const el = root?.querySelector<HTMLElement>(`[id="${CSS.escape(id)}"]`);
+  el?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 export default function DocsView() {
-  const takeHandoff = useApp((s) => s.takeHandoff);
   const toast = useApp((s) => s.toast);
-  const [current, setCurrent] = useState<string | null>(() => lastDocName ?? DOCS[0]?.name ?? null);
+  const handoff = useHandoff();
+  // Another page can ask for a doc ("Learn more" links); otherwise open the last one.
+  const [current, setCurrent] = useState<string | null>(
+    () => (handoff.docName && findDoc(handoff.docName)?.name) || lastDocName || DOCS[0]?.name || null,
+  );
   const [query, setQuery] = useState("");
-  const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
+  /** A #heading to scroll to once the next doc has rendered. */
+  const pendingAnchor = useRef<string | null>(null);
   const readerRef = useRef<HTMLDivElement>(null);
 
   const doc = (current && findDoc(current)) || DOCS[0];
@@ -34,27 +46,19 @@ export default function DocsView() {
       toast(`There is no doc named ${name}.`, "error");
       return;
     }
-    lastDocName = d.name;
+    if (d.name === doc?.name && anchor) {
+      scrollToAnchor(readerRef.current, anchor);
+      return;
+    }
+    pendingAnchor.current = anchor;
     setCurrent(d.name);
-    setPendingAnchor(anchor);
     if (!anchor) readerRef.current?.scrollTo({ top: 0 });
   };
-
-  // Any page → Docs hand-off.
-  useEffect(() => {
-    const h = takeHandoff();
-    if (h.docName) {
-      const d = findDoc(h.docName);
-      if (d) {
-        lastDocName = d.name;
-        setCurrent(d.name);
-      }
-    }
-  }, [takeHandoff]);
 
   // Give rendered headings ids so #anchors and the outline can scroll to them,
   // then jump to a pending anchor.
   useEffect(() => {
+    lastDocName = doc?.name ?? null;
     const root = readerRef.current;
     if (!root) return;
     const seen = new Map<string, number>();
@@ -64,17 +68,10 @@ export default function DocsView() {
       seen.set(base, n + 1);
       el.id = n ? `${base}-${n}` : base;
     });
-    if (pendingAnchor) {
-      scrollToAnchor(pendingAnchor);
-      setPendingAnchor(null);
-    }
-  }, [doc?.name, pendingAnchor]);
-
-  const scrollToAnchor = (anchor: string) => {
-    const id = decodeURIComponent(anchor.replace(/^#/, ""));
-    const el = readerRef.current?.querySelector<HTMLElement>(`[id="${CSS.escape(id)}"]`);
-    el?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
+    const anchor = pendingAnchor.current;
+    pendingAnchor.current = null;
+    if (anchor) scrollToAnchor(root, anchor);
+  }, [doc?.name]);
 
   // Links inside a doc: other docs open here, #anchors scroll, web links go to the browser
   // (handled by <Markdown>). Capture phase so nothing else navigates the web view.
@@ -90,7 +87,7 @@ export default function DocsView() {
       return;
     }
     if (href.startsWith("#")) {
-      scrollToAnchor(href);
+      scrollToAnchor(readerRef.current, href);
       return;
     }
     const [file, hash] = href.split("#");
@@ -124,8 +121,9 @@ export default function DocsView() {
     return (
       <Page title="Docs" subtitle="The collected fm documentation." actions={appleButton}>
         <Empty icon={<BookOpen size={30} />} title="No docs yet" action={appleButton}>
-          The app shows the Markdown files from the docs folder of the project. They are added when the app is built. The
-          docs folder is empty right now, so there is nothing to show. Apple's Foundation Models documentation is online.
+          The app shows the Markdown files from the docs folder of the project. They are added when the app is built.
+          The docs folder is empty right now, so there is nothing to show. Apple's Foundation Models documentation is
+          online.
         </Empty>
       </Page>
     );
@@ -141,6 +139,7 @@ export default function DocsView() {
               className="dc-search__input"
               value={query}
               placeholder="Search docs"
+              aria-label="Search docs"
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Escape") setQuery("");
@@ -169,7 +168,7 @@ export default function DocsView() {
                     <span className="dc-item__title">{d.title}</span>
                     {snippet && <span className="dc-item__snippet">{snippet}</span>}
                   </button>
-                  {active && !q && <Outline doc={d} onPick={(slug) => scrollToAnchor(slug)} />}
+                  {active && !q && <Outline doc={d} onPick={(slug) => scrollToAnchor(readerRef.current, slug)} />}
                 </div>
               );
             })}

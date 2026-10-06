@@ -1,4 +1,4 @@
-/* CONTRACT FILE (owned by the lead). Base styles and shared component classes.
+/* Base styles and shared component classes.
    View-specific styles go in a CSS file next to the view (e.g. ChatView.css). */
 
 * {
@@ -32,6 +32,17 @@ select,
 button {
   font: inherit;
   color: inherit;
+}
+
+/* Focus rings show for keyboard focus only (:focus-visible), never after a mouse
+   click. Components with their own ring override this. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+:where(button, a, summary, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .selectable,
@@ -319,7 +330,10 @@ a:hover {
   font-weight: 500;
   white-space: nowrap;
   cursor: default;
-  transition: background 0.15s var(--ease), transform 0.1s var(--ease), opacity 0.15s;
+  transition:
+    background 0.15s var(--ease),
+    transform 0.1s var(--ease),
+    opacity 0.15s;
   box-shadow: var(--shadow-sm);
 }
 
@@ -567,7 +581,9 @@ a:hover {
   padding: 5px 9px;
   min-height: 28px;
   outline: none;
-  transition: box-shadow 0.15s var(--ease), border-color 0.15s;
+  transition:
+    box-shadow 0.15s var(--ease),
+    border-color 0.15s;
   box-shadow: inset 0 0.5px 1px rgba(0, 0, 0, 0.04);
 }
 
@@ -593,9 +609,12 @@ a:hover {
   -webkit-appearance: none;
   appearance: none;
   padding-right: 26px;
-  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
     linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%;
+  background-position:
+    calc(100% - 13px) 50%,
+    calc(100% - 9px) 50%;
   background-size: 4px 4px;
   background-repeat: no-repeat;
 }
@@ -1027,6 +1046,20 @@ a:hover {
 .steps__item--done .steps__num {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+/* A step you can go back to. */
+.steps__item--button {
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.steps__item--button:hover:not(.steps__item--active) {
+  color: var(--label-2);
 }
 
 .steps__line {

@@ -1,8 +1,7 @@
 // MCP Servers page: connected tool servers, their tools, and the add wizard.
-// OWNER: agent "ui-extend".
 
 import { ChevronRight, Pencil, Plug, Plus, RotateCw, Trash2, Wrench } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
 import {
   Badge,
   Button,
@@ -17,14 +16,19 @@ import {
   Spinner,
   StatusDot,
   Toggle,
-  cx,
 } from "../components/ui";
 import { errorMessage, mcpConnect, mcpDisconnect, mcpStatuses, onMcpStatus } from "../lib/api";
-import { useApp } from "../lib/store";
+import { cx } from "../lib/cx";
+import { tokensLabel } from "../lib/format";
+import { tildeText } from "../lib/paths";
+import { useApp, useHandoff } from "../lib/store";
 import type { AppConfig, Approval, McpServerConfig, McpServerStatus } from "../lib/types";
-import { McpWizard, mcpToolTokens, transportLine } from "./mcp/McpWizard";
+import { McpWizard } from "./mcp/McpWizard";
 import { MCP_TEMPLATES } from "./mcp/templates";
-import { APPROVAL_OPTIONS, ConfirmModal, ContextBudget, Tile, computeBudget, tokensLabel, useExtendData } from "./tools/shared";
+import { mcpToolTokens, transportLine } from "./mcp/transport";
+import { APPROVAL_OPTIONS, computeBudget } from "./tools/helpers";
+import { ConfirmModal, ContextBudget, Tile } from "./tools/shared";
+import { useExtendData } from "./tools/useExtendData";
 
 export default function McpView() {
   const config = useApp((s) => s.config);
@@ -42,18 +46,18 @@ function McpPage({ config }: { config: AppConfig }) {
   const updateConfig = useApp((s) => s.updateConfig);
   const toast = useApp((s) => s.toast);
   const navigate = useApp((s) => s.navigate);
-  const takeHandoff = useApp((s) => s.takeHandoff);
+  const handoff = useHandoff();
   const { tools, skills, reload } = useExtendData();
 
   const [statuses, setStatuses] = useState<Record<string, McpServerStatus>>({});
   const [statusError, setStatusError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<Record<string, boolean>>({});
-  const [wizard, setWizard] = useState<{ editing: McpServerConfig | null } | null>(null);
+  // Another page can open the "Add server" wizard right away.
+  const [wizard, setWizard] = useState<{ editing: McpServerConfig | null } | null>(() =>
+    handoff.openWizard ? { editing: null } : null,
+  );
   const [deleting, setDeleting] = useState<McpServerConfig | null>(null);
-
-  const reloadRef = useRef(reload);
-  reloadRef.current = reload;
 
   const apply = useCallback((list: McpServerStatus[]) => {
     setStatuses((prev) => {
@@ -63,23 +67,30 @@ function McpPage({ config }: { config: AppConfig }) {
     });
   }, []);
 
-  const refreshStatuses = useCallback(async () => {
-    try {
-      apply(await mcpStatuses());
-      setStatusError(null);
-    } catch (err) {
-      setStatusError(errorMessage(err));
-    }
-  }, [apply]);
+  // Never rejects: a failure shows above the list.
+  const refreshStatuses = useCallback(
+    () =>
+      mcpStatuses().then(
+        (list) => {
+          apply(list);
+          setStatusError(null);
+        },
+        (err) => setStatusError(errorMessage(err)),
+      ),
+    [apply],
+  );
+
+  // A server connected or stopped: its tools change the catalog and the budget.
+  const onLiveStatus = useEffectEvent((list: McpServerStatus[]) => {
+    apply(list);
+    void reload();
+  });
 
   useEffect(() => {
-    refreshStatuses();
+    void refreshStatuses();
     let unlisten: (() => void) | null = null;
     let cancelled = false;
-    onMcpStatus((list) => {
-      apply(list);
-      reloadRef.current();
-    })
+    onMcpStatus((list) => onLiveStatus(list))
       .then((u) => {
         if (cancelled) u();
         else unlisten = u;
@@ -91,11 +102,7 @@ function McpPage({ config }: { config: AppConfig }) {
       cancelled = true;
       unlisten?.();
     };
-  }, [apply, refreshStatuses]);
-
-  useEffect(() => {
-    if (takeHandoff().openWizard) setWizard({ editing: null });
-  }, [takeHandoff]);
+  }, [refreshStatuses]);
 
   const budget = useMemo(() => computeBudget(config, tools, skills), [config, tools, skills]);
 
@@ -130,7 +137,10 @@ function McpPage({ config }: { config: AppConfig }) {
       if (!saved) return;
       try {
         if (enabled) {
-          setStatuses((prev) => ({ ...prev, [server.id]: { ...(prev[server.id] ?? emptyStatus(server)), state: "connecting", error: null } }));
+          setStatuses((prev) => ({
+            ...prev,
+            [server.id]: { ...(prev[server.id] ?? emptyStatus(server)), state: "connecting", error: null },
+          }));
           apply(await mcpConnect(server.id));
         } else {
           apply(await mcpDisconnect(server.id));
@@ -151,7 +161,9 @@ function McpPage({ config }: { config: AppConfig }) {
     updateConfig((d) => {
       const s = d.mcpServers.find((x) => x.id === server.id);
       if (!s) return;
-      s.disabledTools = on ? s.disabledTools.filter((n) => !names.includes(n)) : [...new Set([...s.disabledTools, ...names])];
+      s.disabledTools = on
+        ? s.disabledTools.filter((n) => !names.includes(n))
+        : [...new Set([...s.disabledTools, ...names])];
     }).then(() => reload());
 
   const remove = async (server: McpServerConfig) => {
@@ -185,7 +197,9 @@ function McpPage({ config }: { config: AppConfig }) {
 
   // Tokens of the edited server's own tools, so the wizard does not count them twice.
   const ownTokens = (id: string | undefined) =>
-    id ? (tools ?? []).filter((t) => t.enabled && t.id.startsWith(`mcp:${id}:`)).reduce((s, t) => s + t.tokenEstimate, 0) : 0;
+    id
+      ? (tools ?? []).filter((t) => t.enabled && t.id.startsWith(`mcp:${id}:`)).reduce((s, t) => s + t.tokenEstimate, 0)
+      : 0;
 
   const servers = config.mcpServers;
 
@@ -223,7 +237,12 @@ function McpPage({ config }: { config: AppConfig }) {
                   MCP (Model Context Protocol) servers are small programs that give the model new tools, like reading
                   files in a folder or fetching web pages. The wizard checks what you need and tests the connection.
                 </div>
-                <Button variant="primary" size="lg" icon={<Plus size={16} />} onClick={() => setWizard({ editing: null })}>
+                <Button
+                  variant="primary"
+                  size="lg"
+                  icon={<Plus size={16} />}
+                  onClick={() => setWizard({ editing: null })}
+                >
                   Add MCP server
                 </Button>
                 <div className="row row--wrap" style={{ justifyContent: "center", gap: 6, marginTop: 6 }}>
@@ -328,6 +347,9 @@ function ServerRow(props: {
   onToolsOn: (names: string[], on: boolean) => void;
 }) {
   const { server, status } = props;
+  const home = useApp((s) => s.paths?.homeDir);
+  const tilde = (text: string) => tildeText(text, home);
+  const line = tilde(transportLine(server.transport));
   const state = status?.state ?? "disconnected";
   const tools = status?.tools ?? [];
   const isOn = (name: string) => !server.disabledTools.includes(name);
@@ -344,7 +366,11 @@ function ServerRow(props: {
   return (
     <div className="ext-server">
       <div className={cx("group__row ext-row", !server.enabled && "ext-row--off")}>
-        <IconButton label={props.open ? "Hide details" : "Show details"} onClick={props.onToggleOpen} style={{ width: 22, height: 22, marginTop: 3 }}>
+        <IconButton
+          label={props.open ? "Hide details" : "Show details"}
+          onClick={props.onToggleOpen}
+          style={{ width: 22, height: 22, marginTop: 3 }}
+        >
           <ChevronRight size={14} className={cx("ext-chevron", props.open && "ext-chevron--open")} />
         </IconButton>
         <div className="ext-row__main" onClick={props.onToggleOpen}>
@@ -363,12 +389,12 @@ function ServerRow(props: {
             {state === "connected" && tokens > 0 && <span className="xsmall muted">· {tokensLabel(tokens)}</span>}
           </div>
           {state === "error" && status?.error && (
-            <div className="ext-row__desc" style={{ color: "var(--red)" }} title={status.error}>
-              {status.error}
+            <div className="ext-row__desc" style={{ color: "var(--red)" }} title={tilde(status.error)}>
+              {tilde(status.error)}
             </div>
           )}
-          <div className="ext-row__meta mono truncate" style={{ maxWidth: "100%" }} title={transportLine(server.transport)}>
-            {transportLine(server.transport)}
+          <div className="ext-row__meta mono truncate" style={{ maxWidth: "100%" }} title={line}>
+            {line}
           </div>
         </div>
         <div className="ext-row__controls">
@@ -382,7 +408,12 @@ function ServerRow(props: {
           <IconButton label="Delete" onClick={props.onDelete}>
             <Trash2 size={14} />
           </IconButton>
-          <Toggle checked={server.enabled} onChange={props.onEnabled} disabled={props.busy} label={`Enable ${server.name}`} />
+          <Toggle
+            checked={server.enabled}
+            onChange={props.onEnabled}
+            disabled={props.busy}
+            label={`Enable ${server.name}`}
+          />
         </div>
       </div>
       {props.open && (
@@ -391,14 +422,19 @@ function ServerRow(props: {
             <div className="row">
               <span className="small">When the model wants to use a tool from this server</span>
               <div className="spacer" />
-              <Select<Approval> value={server.approval} onChange={props.onApproval} options={APPROVAL_OPTIONS} style={{ width: 150 }} />
+              <Select<Approval>
+                value={server.approval}
+                onChange={props.onApproval}
+                options={APPROVAL_OPTIONS}
+                style={{ width: 150 }}
+              />
             </div>
             <CommandPreview command={transportLine(server.transport)} />
 
             {state === "error" && (
               <>
                 <Callout tone="error">
-                  <div className="selectable">{status?.error ?? "The server stopped with an error."}</div>
+                  <div className="selectable">{tilde(status?.error ?? "The server stopped with an error.")}</div>
                   <div className="xsmall muted" style={{ marginTop: 4 }}>
                     {server.transport.type === "http"
                       ? "Check the URL and headers with Edit, then click Reconnect."
@@ -418,13 +454,34 @@ function ServerRow(props: {
               <div className="stack" style={{ gap: 6 }}>
                 <div className="row">
                   <span className="small">
-                    <b>Tools</b> <span className="muted">· {onCount} of {tools.length} on · {tokensLabel(tokens)}</span>
+                    <b>Tools</b>{" "}
+                    <span className="muted">
+                      · {onCount} of {tools.length} on · {tokensLabel(tokens)}
+                    </span>
                   </span>
                   <div className="spacer" />
-                  <Button size="sm" variant="plain" onClick={() => props.onToolsOn(tools.map((t) => t.name), true)}>
+                  <Button
+                    size="sm"
+                    variant="plain"
+                    onClick={() =>
+                      props.onToolsOn(
+                        tools.map((t) => t.name),
+                        true,
+                      )
+                    }
+                  >
                     All on
                   </Button>
-                  <Button size="sm" variant="plain" onClick={() => props.onToolsOn(tools.map((t) => t.name), false)}>
+                  <Button
+                    size="sm"
+                    variant="plain"
+                    onClick={() =>
+                      props.onToolsOn(
+                        tools.map((t) => t.name),
+                        false,
+                      )
+                    }
+                  >
                     All off
                   </Button>
                 </div>

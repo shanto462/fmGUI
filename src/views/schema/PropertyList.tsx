@@ -1,7 +1,8 @@
-// Property rows for the Schema Builder. OWNER: agent "ui-build".
+// Property rows for the Schema Builder.
 
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
-import { Button, Chip, IconButton, Select, TextInput, cx } from "../../components/ui";
+import { Button, Chip, IconButton, Select, TextInput } from "../../components/ui";
+import { cx } from "../../lib/cx";
 import type { SchemaProperty, SchemaPropertyType } from "../../lib/fmArgs";
 import { newProperty } from "./presets";
 import "./schema.css";
@@ -87,7 +88,11 @@ export function PropertyList(props: {
                 aria-label="Description"
                 spellCheck
               />
-              <Chip on={p.isArray} onClick={() => update(p.id, { isArray: !p.isArray })} title="A list of values (--array)">
+              <Chip
+                on={p.isArray}
+                onClick={() => update(p.id, { isArray: !p.isArray })}
+                title="A list of values (--array)"
+              >
                 Array
               </Chip>
               <Chip

@@ -1,4 +1,4 @@
-// Settings: run setup again, and About. OWNER: agent "ui-shell".
+// Settings: run setup again, and About.
 
 import { getVersion } from "@tauri-apps/api/app";
 import { BookOpen, Sparkles, Wand2 } from "lucide-react";
@@ -11,15 +11,7 @@ import { SettingRow } from "./SettingRow";
 const FALLBACK_VERSION = "0.1.0";
 
 export function SetupSection() {
-  const updateConfig = useApp((s) => s.updateConfig);
   const navigate = useApp((s) => s.navigate);
-
-  const runAgain = async () => {
-    const saved = await updateConfig((c) => {
-      c.setupCompleted = false;
-    });
-    if (saved) navigate("setup");
-  };
 
   return (
     <Section title="Setup">
@@ -30,7 +22,7 @@ export function SetupSection() {
           label="Setup Guide"
           hint="Walk through the checks again: fm, the model, the license and the chat engine."
         >
-          <Button size="sm" onClick={runAgain}>
+          <Button size="sm" onClick={() => navigate("setup", { setupStep: 0 })}>
             Run setup again
           </Button>
         </SettingRow>

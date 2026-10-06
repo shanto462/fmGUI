@@ -1,14 +1,14 @@
-// App shell: sidebar navigation + routed views. OWNER: lead.
-// Views live in src/views/<Name>View.tsx; each view agent owns its own file(s).
+// App shell: sidebar navigation and the routed pages.
+// Pages live in src/views/<Name>View.tsx, their parts in src/views/<name>/.
 
 import {
-  Lock,
   BookOpen,
   Boxes,
   Braces,
   Gauge,
   History,
   LayoutDashboard,
+  Lock,
   MessageSquare,
   Plug,
   Radio,
@@ -18,9 +18,10 @@ import {
   Wand2,
   Wrench,
 } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
-import { Toasts, StatusDot, cx } from "./components/ui";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Button, Empty, StatusDot, Toasts } from "./components/ui";
 import { errorMessage, isTauri } from "./lib/api";
+import { cx } from "./lib/cx";
 import { isLocked, useApp, type Route } from "./lib/store";
 import ChatView from "./views/ChatView";
 import DocsView from "./views/DocsView";
@@ -118,18 +119,39 @@ export default function App() {
   const route = useApp((s) => s.route);
   const navigate = useApp((s) => s.navigate);
   const load = useApp((s) => s.load);
-  const toast = useApp((s) => s.toast);
-  const config = useApp((s) => s.config);
   const status = useApp((s) => s.status);
   const loaded = useApp((s) => s.loaded);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const start = useCallback(
+    () =>
+      load()
+        .then(() => setLoadError(null))
+        .catch((err) => setLoadError(errorMessage(err))),
+    [load],
+  );
 
   useEffect(() => {
-    if (!isTauri()) return;
-    load().catch((err) => toast(errorMessage(err), "error"));
-  }, [load, toast]);
+    if (isTauri()) void start();
+  }, [start]);
+
+  // Safety net: every call shows its own error, but if one slips through, the
+  // user still sees it instead of a silent failure.
+  useEffect(() => {
+    const onRejection = (e: PromiseRejectionEvent) => {
+      e.preventDefault();
+      useApp.getState().toast(errorMessage(e.reason), "error");
+    };
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => window.removeEventListener("unhandledrejection", onRejection);
+  }, []);
 
   if (!isTauri()) {
-    return <div className="empty">Open this UI inside the fmGUI app (npm run tauri dev).</div>;
+    return (
+      <div className="empty">
+        Open this page inside the fmGUI app (npm run app). For a preview with fake data, add ?mock=1 to the address.
+      </div>
+    );
   }
 
   return (
@@ -141,7 +163,7 @@ export default function App() {
             <div key={i} className="sidebar__group">
               {group.title && <div className="sidebar__group-title">{group.title}</div>}
               {group.items.map((item) => {
-                const locked = loaded && isLocked(item.route, config, status);
+                const locked = loaded && isLocked(item.route, status);
                 return (
                   <button
                     key={item.route}
@@ -174,7 +196,22 @@ export default function App() {
         </div>
       </aside>
       <main className="content">
-        {loaded ? VIEWS[route]() : <div className="empty"><Boxes size={28} />Checking fm…</div>}
+        {loaded ? (
+          VIEWS[route]()
+        ) : loadError ? (
+          <Empty
+            icon={<Boxes size={28} />}
+            title="fmGUI could not load its settings"
+            action={<Button onClick={() => void start()}>Try again</Button>}
+          >
+            <span className="selectable">{loadError}</span>
+          </Empty>
+        ) : (
+          <div className="empty">
+            <Boxes size={28} />
+            Checking fm…
+          </div>
+        )}
       </main>
       <Toasts />
     </div>

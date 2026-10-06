@@ -1,7 +1,8 @@
-// CONTRACT FILE (owned by the lead). Global UI state: navigation, config,
-// fm status, and small hand-offs between pages.
+// Global UI state: navigation, config, fm status, toasts, and small hand-offs
+// between pages.
 
 import { listen } from "@tauri-apps/api/event";
+import { useEffect, useState } from "react";
 import { create } from "zustand";
 import * as api from "./api";
 import type { AppConfig, FmStatus, PathsInfo } from "./types";
@@ -37,6 +38,8 @@ export interface Handoff {
   docName?: string;
   /** Any page → Tools/MCP/Skills: open the "add" wizard right away. */
   openWizard?: boolean;
+  /** Any page → Setup: start on this step ("Run setup again" passes 0). */
+  setupStep?: number;
 }
 
 interface AppStore {
@@ -51,7 +54,9 @@ interface AppStore {
   toasts: Toast[];
 
   navigate: (route: Route, handoff?: Handoff) => void;
+  /** Returns the hand-off and clears it. For an effect that acts on it once; pages that only need it for their first render use `useHandoff`. */
   takeHandoff: () => Handoff;
+  /** Loads config, paths and the fm status. Throws when the config or paths cannot be read. */
   load: () => Promise<void>;
   refreshStatus: () => Promise<FmStatus | null>;
   /** Saves a modified copy of the config. */
@@ -60,22 +65,45 @@ interface AppStore {
   dismissToast: (id: string) => void;
 }
 
-/** Pages that stay open before setup is done, because they help fix problems. */
-export const OPEN_ROUTES: ReadonlySet<Route> = new Set<Route>(["setup", "docs", "settings"]);
+/** Pages that stay open while a check fails, because they help fix problems. */
+const OPEN_ROUTES: ReadonlySet<Route> = new Set<Route>(["setup", "docs", "settings"]);
 
-/** True when setup is finished and fm, the model and the license are all OK. */
-export function isReady(config: AppConfig | null, status: FmStatus | null): boolean {
-  return !!config?.setupCompleted && !!status?.binaryFound && !!status.modelAvailable && !!status.licenseAgreed;
+/** True when fm is found, the model is available and the license is agreed. */
+export function isReady(status: FmStatus | null): boolean {
+  return !!status?.binaryFound && !!status.modelAvailable && !!status.licenseAgreed;
 }
 
-/** A page is locked until the app is ready. */
-export function isLocked(route: Route, config: AppConfig | null, status: FmStatus | null): boolean {
-  return !OPEN_ROUTES.has(route) && !isReady(config, status);
+/** A page is locked while one of the checks fails. */
+export function isLocked(route: Route, status: FmStatus | null): boolean {
+  return !OPEN_ROUTES.has(route) && !isReady(status);
 }
 
 // Rust emits "config-changed" after every save, including saves the engine
 // makes itself (an "Always allow" approval). Keep the store in sync.
 let configListener: Promise<unknown> | null = null;
+let loading: Promise<void> | null = null;
+
+/** First load: config, paths and the fm checks. Opens Overview when every check passes, else Setup. */
+async function loadApp() {
+  const { getState: get, setState: set } = useApp;
+  const [config, paths] = await Promise.all([api.getConfig(), api.getPaths()]);
+  set({ config, paths });
+  // Without the listener the store only misses saves made by the engine itself.
+  configListener ??= listen<AppConfig>("config-changed", (e) => {
+    set({ config: e.payload });
+    guard();
+  }).catch(() => null);
+  const status = await get().refreshStatus();
+  const ready = isReady(status);
+  set({ loaded: true, route: ready ? "overview" : "setup" });
+  // Every check passes, so there is nothing left to set up: mark setup as done.
+  if (ready && !config.setupCompleted) {
+    const saved = await get().updateConfig((c) => {
+      c.setupCompleted = true;
+    });
+    if (saved) get().toast("Everything is ready.", "success");
+  }
+}
 
 export const useApp = create<AppStore>((set, get) => ({
   route: "overview",
@@ -88,8 +116,8 @@ export const useApp = create<AppStore>((set, get) => ({
   toasts: [],
 
   navigate: (route, handoff = {}) => {
-    const { config, status, loaded } = get();
-    if (loaded && isLocked(route, config, status)) {
+    const { status, loaded } = get();
+    if (loaded && isLocked(route, status)) {
       set({ route: "setup", handoff: {} });
       get().toast("Finish the setup first. Other pages open when fm, the model and the license are ready.");
       return;
@@ -103,15 +131,13 @@ export const useApp = create<AppStore>((set, get) => ({
     return h;
   },
 
-  load: async () => {
-    const [config, paths] = await Promise.all([api.getConfig(), api.getPaths()]);
-    set({ config, paths });
-    configListener ??= listen<AppConfig>("config-changed", (e) => {
-      set({ config: e.payload });
-      guard();
+  // Calls made while a load runs share it (React runs start-up effects twice in development).
+  load: () => {
+    loading ??= loadApp().catch((err) => {
+      loading = null; // so "Try again" can run it again
+      throw err;
     });
-    const status = await get().refreshStatus();
-    set({ loaded: true, route: isReady(config, status) ? "overview" : "setup" });
+    return loading;
   },
 
   refreshStatus: async () => {
@@ -155,8 +181,20 @@ export const useApp = create<AppStore>((set, get) => ({
 }));
 
 /** Sends the user to Setup when the open page becomes locked (for example the
- *  license check fails later, or "Run setup again" was pressed). */
+ *  license check fails later). */
 function guard() {
   const s = useApp.getState();
-  if (s.loaded && isLocked(s.route, s.config, s.status)) useApp.setState({ route: "setup", handoff: {} });
+  if (s.loaded && isLocked(s.route, s.status)) useApp.setState({ route: "setup", handoff: {} });
+}
+
+/**
+ * The hand-off the current page was opened with. It is read once when the page
+ * mounts and then cleared in the store, so it does not apply again later.
+ */
+export function useHandoff(): Handoff {
+  const [handoff] = useState(() => useApp.getState().handoff);
+  useEffect(() => {
+    if (Object.keys(useApp.getState().handoff).length > 0) useApp.setState({ handoff: {} });
+  }, []);
+  return handoff;
 }

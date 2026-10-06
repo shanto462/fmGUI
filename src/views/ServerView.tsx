@@ -1,5 +1,5 @@
 // API Server: run a user-facing `fm serve` that other apps can use (OpenAI-style
-// Chat Completions). OWNER: agent "ui-build".
+// Chat Completions).
 // Left: status, settings (saved to config.publicServer), endpoints.
 // Right: live logs, "Try it", code snippets, compatibility notes.
 
@@ -14,6 +14,7 @@ import {
   CopyButton,
   Field,
   Page,
+  PathInput,
   Segmented,
   StatusDot,
   TextInput,
@@ -27,10 +28,13 @@ import {
   publicServerStatus,
   publicServerStop,
 } from "../lib/api";
-import { displayCommand, serveArgs } from "../lib/fmArgs";
+import { DEFAULT_FM_PATH, displayCommand, serveArgs } from "../lib/fmArgs";
+import { formatUptime } from "../lib/format";
+import { useTicker } from "../lib/hooks";
+import { joinPath, tildePath, tildeText } from "../lib/paths";
 import { useApp } from "../lib/store";
 import type { LogLine, PublicServerConfig, PublicServerStatus } from "../lib/types";
-import { InspectorRow, InspectorSection, Toolbar, Workbench, formatUptime, joinPath, useTicker } from "./playground/workbench";
+import { InspectorRow, InspectorSection, Toolbar, Workbench } from "./playground/workbench";
 import { LogPanel } from "./server/LogPanel";
 import { COMPAT, ENDPOINTS, endpointCopyText, snippetsFor, type CompatStatus, type Target } from "./server/snippets";
 import { TryRequest } from "./server/TryRequest";
@@ -80,9 +84,10 @@ function parsePort(text: string): number | null {
 export default function ServerView() {
   const config = useApp((s) => s.config);
   const paths = useApp((s) => s.paths);
+  const home = paths?.homeDir;
   const updateConfig = useApp((s) => s.updateConfig);
   const toast = useApp((s) => s.toast);
-  const fmPath = config?.fmPath || "/usr/bin/fm";
+  const fmPath = config?.fmPath || DEFAULT_FM_PATH;
   const defaultSocket = joinPath(paths?.dataDir ?? "~/Library/Application Support/fmGUI", "fm.sock");
 
   const saved = config?.publicServer;
@@ -135,13 +140,14 @@ export default function ServerView() {
         setLogs((prev) => [...s.logs.filter((l) => !prev.length || l.ts < prev[0].ts), ...prev].slice(-MAX_LOGS));
       })
       .catch((err) => alive && setStatusError(errorMessage(err)));
+    // Live events are optional: the poll below keeps the status fresh without them.
     onPublicServerLog((line) => alive && setLogs((prev) => [...prev, line].slice(-MAX_LOGS)))
       .then((u) => (alive ? unlisten.push(u) : u()))
       .catch(() => {});
     onPublicServerState((s) => alive && setStatus(s))
       .then((u) => (alive ? unlisten.push(u) : u()))
       .catch(() => {});
-    // Fallback poll, in case an event is missed.
+    // Fallback poll, in case an event is missed. The first call above shows its error.
     const poll = setInterval(() => {
       publicServerStatus()
         .then((s) => alive && setStatus(s))
@@ -224,10 +230,12 @@ export default function ServerView() {
               <div className="sv-status">
                 <StatusDot tone={running ? "green" : status?.lastError ? "red" : "gray"} pulse={busy === "start"} />
                 <div className="sv-status__text">
-                  <div className="sv-status__title">{running ? "Running" : busy === "start" ? "Starting…" : "Stopped"}</div>
+                  <div className="sv-status__title">
+                    {running ? "Running" : busy === "start" ? "Starting…" : "Stopped"}
+                  </div>
                   <div className="xsmall muted truncate selectable">
                     {running
-                      ? status?.url || status?.socketPath || "Address unknown"
+                      ? status?.url || (status?.socketPath && tildePath(status.socketPath, home)) || "Address unknown"
                       : "Not listening. Start it to accept requests."}
                   </div>
                 </div>
@@ -262,7 +270,7 @@ export default function ServerView() {
                   </span>
                 </div>
               )}
-              {status?.lastError && <Callout tone="error">{status.lastError}</Callout>}
+              {status?.lastError && <Callout tone="error">{tildeText(status.lastError, home)}</Callout>}
               {statusError && <Callout tone="error">Could not read the server status: {statusError}</Callout>}
               {needsRestart && (
                 <Callout tone="warning">
@@ -311,23 +319,21 @@ export default function ServerView() {
                       />
                     </Field>
                   </div>
-                  <div className="xsmall muted">
-                    127.0.0.1 means only this Mac. 0.0.0.0 opens it to your network.
-                  </div>
+                  <div className="xsmall muted">127.0.0.1 means only this Mac. 0.0.0.0 opens it to your network.</div>
                   {isOpenHost && (
                     <Callout tone="warning">
-                      <strong>Open to your network.</strong> Other devices on your network can use the model through this
-                      server. There is no password or API key.
+                      <strong>Open to your network.</strong> Other devices on your network can use the model through
+                      this server. There is no password or API key.
                     </Callout>
                   )}
                 </>
               ) : (
                 <Field label="Socket path" hint="Only programs on this Mac with access to the file can connect.">
-                  <TextInput
+                  <PathInput
                     className="wb-mono-input"
                     value={draft.socketPath}
-                    placeholder={defaultSocket}
-                    onChange={(e) => setDraft({ ...draft, socketPath: e.target.value })}
+                    placeholder={tildePath(defaultSocket, home)}
+                    onChange={(socketPath) => setDraft({ ...draft, socketPath })}
                   />
                 </Field>
               )}
@@ -358,7 +364,9 @@ export default function ServerView() {
               </div>
               <div className="xsmall muted">
                 {target.mode === "socket" ? (
-                  <>Socket: <span className="mono selectable">{target.socketPath}</span></>
+                  <>
+                    Socket: <span className="mono selectable">{tildePath(target.socketPath, home)}</span>
+                  </>
                 ) : (
                   <>
                     Base URL for OpenAI clients: <span className="mono selectable">{target.baseUrl}/v1</span>
@@ -431,15 +439,15 @@ export default function ServerView() {
               <Callout>
                 {target.mode === "socket" ? (
                   <>
-                    Socket mode has no TCP port. Clients connect through the socket file, and the host name in the URL is
-                    ignored. Browsers cannot use a Unix socket.
+                    Socket mode has no TCP port. Clients connect through the socket file, and the host name in the URL
+                    is ignored. Browsers cannot use a Unix socket.
                   </>
                 ) : (
                   <>
-                    fm serve streams by default. Send <span className="mono">"stream": false</span> when you want one JSON
-                    reply. The model name is <span className="mono">system</span>. No API key is checked, so any value
-                    works. Web pages cannot call it: fm serve answers HTTP 403 to browser requests, so call it from a
-                    server, a script or an app.
+                    fm serve streams by default. Send <span className="mono">"stream": false</span> when you want one
+                    JSON reply. The model name is <span className="mono">system</span>. No API key is checked, so any
+                    value works. Web pages cannot call it: fm serve answers HTTP 403 to browser requests, so call it
+                    from a server, a script or an app.
                   </>
                 )}
               </Callout>
@@ -472,7 +480,9 @@ export default function ServerView() {
                   </tbody>
                 </table>
               </div>
-              <div className="xsmall muted">Tested with fm serve on macOS 27.0.1. Later macOS versions may change this.</div>
+              <div className="xsmall muted">
+                Tested with fm serve on macOS 27.0.1. Later macOS versions may change this.
+              </div>
             </div>
           </div>
         )}
