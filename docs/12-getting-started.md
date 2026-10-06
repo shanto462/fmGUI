@@ -31,12 +31,15 @@ When it is ready, it prints `System model available`.
    xattr -dr com.apple.quarantine /Applications/fmGUI.app
    ```
 
-3. Open fmGUI. On the first start it opens the **Setup Guide**.
+3. Open fmGUI. If `fm`, the model and the license are already fine, setup finishes by itself and you land on
+   **Overview** ("Everything is ready."). Otherwise the **Setup Guide** opens on the first check that fails.
 
 ## Step 2: Follow the Setup Guide
 
-The Setup Guide has seven steps. Each step checks one thing and tells you how to fix it. Until the setup is done and
-the checks pass, the other pages show a lock. **Setup Guide**, **Docs** and **Settings** always stay open.
+The Setup Guide has seven steps. Each step checks one thing and tells you how to fix it. It opens on the first step
+that fails (or on **Done** when everything passes), so you only see what needs your attention. While `fm`, the model
+or the license fails, the other pages show a lock. **Setup Guide**, **Docs** and **Settings** always stay open. To walk
+through every step from the start, use **Run setup again** in Settings or on the Overview page.
 
 | Step | What it checks | What you do |
 |------|----------------|-------------|

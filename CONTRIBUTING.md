@@ -123,7 +123,8 @@ Every change in behavior needs a test.
 - **UI unit tests** are `*.test.ts` files under `src/` (Vitest). Run them with `npm test`.
 - **Mock mode** runs the UI in a normal browser with a fake backend, so you can work on pages without Rust or `fm`:
   `npm run preview:mock`, or `npm run dev` and open <http://localhost:1420/?mock=1>. Other scenarios:
-  `?mock=nolicense`, `?mock=nofm` and `?mock=setup` (a fresh install).
+  `?mock=nolicense` (opens Setup on the License step), `?mock=nofm`, and `?mock=setup` (a fresh install whose checks
+  pass, so setup completes by itself).
 
 Debug aid: set `FMGUI_DUMP_REQUEST=/tmp/request.json` before `npm run app` to write the last request the engine sent
 to `fm serve` into that file.
