@@ -1,0 +1,189 @@
+/* Docs viewer styles. OWNER: agent "ui-build". Class prefix: dc-. */
+
+.wb__side.dc-side {
+  width: 270px;
+}
+
+.dc-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 10px 4px;
+  padding: 0 4px 0 9px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+  border: 0.5px solid var(--field-border);
+  color: var(--label-3);
+}
+
+.dc-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.dc-search__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--label);
+  font-size: var(--text-sm);
+}
+
+.dc-search__input::placeholder {
+  color: var(--label-3);
+}
+
+.dc-list {
+  padding: 4px 0 12px;
+}
+
+.dc-none {
+  padding: 12px 18px;
+  font-size: var(--text-sm);
+  color: var(--label-2);
+}
+
+.dc-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: calc(100% - 16px);
+  margin: 1px 8px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: default;
+}
+
+.dc-item:hover {
+  background: var(--hover);
+}
+
+.dc-item--active,
+.dc-item--active:hover {
+  background: var(--accent-soft);
+}
+
+.dc-item__title {
+  font-size: var(--text-md);
+  line-height: 1.3;
+}
+
+.dc-item--active .dc-item__title {
+  font-weight: 500;
+}
+
+.dc-item__snippet {
+  font-size: var(--text-xs);
+  color: var(--label-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.dc-outline {
+  display: flex;
+  flex-direction: column;
+  margin: 2px 8px 6px 20px;
+  padding-left: 8px;
+  border-left: 1px solid var(--separator);
+}
+
+.dc-outline__item {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+  font-size: var(--text-sm);
+  color: var(--label-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+
+.dc-outline__item:hover {
+  color: var(--label);
+  background: var(--hover);
+}
+
+.dc-reader {
+  scroll-padding-top: 16px;
+}
+
+.dc-article {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 36px 48px;
+  font-size: 14px;
+}
+
+.dc-article .md h1 {
+  font-size: 28px;
+  letter-spacing: -0.01em;
+}
+
+.dc-article .md h2 {
+  margin-top: 1.8em;
+}
+
+.dc-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 0.5px solid var(--separator);
+}
+
+.dc-pager__btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 48%;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 0.5px solid var(--separator);
+  background: var(--surface);
+  text-align: left;
+  cursor: default;
+}
+
+.dc-pager__btn:hover {
+  border-color: var(--accent);
+}
+
+.dc-pager__btn svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.dc-pager__btn--next {
+  margin-left: auto;
+  text-align: right;
+}
+
+.dc-pager__btn > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dc-pager__label {
+  font-size: var(--text-xs);
+  color: var(--label-2);
+}
+
+.dc-pager__title {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
