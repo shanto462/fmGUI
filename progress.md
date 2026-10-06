@@ -12,17 +12,17 @@ Legend: ✅ done · 🔄 in progress · ⏳ pending · ⛔ blocked
 
 ## Setup
 - ✅ Rust toolchain installed (Homebrew rustup, stable 1.99.0).
-- 🔄 Tauri 2 project skeleton + shared contract (Rust command stubs, TS types, design system).
+- ✅ Tauri 2 project skeleton + shared contract (Rust command stubs, TS types, API wrapper, fm arg builders, store, design system, app shell). Builds: `cargo build`, `tsc`, `vite build`. In commit `init`.
 
 ## Build (delegated to agents)
-- ⏳ Rust: `fm` CLI layer (runner, status, CLI sessions, respond/count/schema commands, public server manager).
-- ⏳ Rust: agent engine (private `fm serve` client, guided-JSON tool router, built-in tools, custom tools, approvals, chat storage).
-- ⏳ Rust: MCP client (stdio + Streamable HTTP) and skills loader.
-- ⏳ UI: app shell, sidebar, setup wizard, overview.
-- ⏳ UI: agent chat + CLI sessions.
-- ⏳ UI: tools, MCP, skills pages with step-by-step setup wizards.
-- ⏳ UI: playground, schema builder, token counter, server page, docs viewer, settings.
-- ⏳ Docs: `docs/` folder with the full collected documentation.
+- 🔄 Rust: `fm` CLI layer (runner, status, CLI sessions, respond/count/schema commands, public server manager).
+- 🔄 Rust: agent engine (private `fm serve` client, guided-JSON tool router, built-in tools, custom tools, approvals, chat storage).
+- 🔄 Rust: MCP client (stdio + Streamable HTTP) and skills loader.
+- 🔄 UI: setup wizard, overview, settings (app shell + sidebar done by lead).
+- 🔄 UI: agent chat + CLI sessions.
+- 🔄 UI: tools, MCP, skills pages with step-by-step setup wizards.
+- 🔄 UI: playground, schema builder, token counter, server page, docs viewer, settings.
+- 🔄 Docs: `docs/` folder with the full collected documentation.
 
 ## Verify
 - ⏳ `cargo build`, `cargo test`, `npm run build` (TypeScript check).

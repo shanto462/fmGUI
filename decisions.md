@@ -10,6 +10,8 @@ Format: date · who · decision · why.
 3. 2026-10-06 · "Electron app." Then right after: "Not Electron, something of Rust?"
 4. 2026-10-06 · "Keep decisions.md, progress.md (pending, in progress), things I asked, decisions any taken by me or you."
 5. 2026-10-06 · "Delegate to agents, do work as much as possible."
+6. 2026-10-06 · "Progress and ETA?"
+7. 2026-10-06 · "Git initialized and committed with init, it has local git config, commit after each step respecting local git config."
 
 ## Decisions
 
@@ -31,3 +33,5 @@ Format: date · who · decision · why.
 | D14 | 2026-10-06 | Claude | The GUI never accepts the license for the user. The setup wizard shows the terms and the `sudo fm license` command to run in Terminal, then re-checks. | Accepting terms is the user's own action. |
 | D15 | 2026-10-06 | Claude | Work split: Claude writes the skeleton and the shared contract (IPC types, design system), then parallel agents each own separate files (Rust CLI layer, agent engine + tools, MCP + skills, UI views, docs). | User request #5. File ownership avoids edit conflicts in one folder. |
 | D16 | 2026-10-06 | Claude | Modern macOS look: transparent title bar with inset traffic lights, sidebar vibrancy (`windowEffects: sidebar`), SF system font, system accent color, automatic light/dark mode. | User request #2. |
+| D17 | 2026-10-06 | User | Commit after each finished step. Use the repo's local git config (author Shanto). Claude stages only the files of that step, adds no AI attribution, and does not push. Agents never run git; the lead commits. | User request #7. The `init` commit (by the user) already holds the skeleton and contracts. |
+| D18 | 2026-10-06 | Claude | Rust agents work in private copies of `src-tauri` (own `CARGO_TARGET_DIR`) and copy back only their own module folders. UI agents work in place on separate files. | One crate: a half-written module would break every other agent's `cargo build`. No worktrees, because that needs commits per agent. |
