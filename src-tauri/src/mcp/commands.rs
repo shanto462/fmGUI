@@ -8,6 +8,8 @@ use tauri::{AppHandle, State};
 #[tauri::command]
 pub async fn mcp_statuses(state: State<'_, AppState>) -> Result<Vec<McpServerStatus>, String> {
     let configs = state.config().mcp_servers;
+    // Servers removed from the settings should not keep running.
+    state.mcp.prune(&configs).await;
     Ok(state.mcp.statuses(&configs).await)
 }
 
@@ -15,7 +17,7 @@ pub async fn mcp_statuses(state: State<'_, AppState>) -> Result<Vec<McpServerSta
 #[tauri::command]
 pub async fn mcp_connect(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<Vec<McpServerStatus>, String> {
     let configs = state.config().mcp_servers;
-    let config = configs.iter().find(|c| c.id == id).ok_or("unknown MCP server")?;
+    let config = configs.iter().find(|c| c.id == id).ok_or("This MCP server is not saved yet. Save it first.")?;
     state.mcp.connect(&app, config).await?;
     Ok(state.mcp.statuses(&configs).await)
 }
