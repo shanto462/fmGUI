@@ -371,6 +371,7 @@ export function CustomToolWizard(props: {
   return (
     <Modal
       wide
+      dismissible={false}
       title={props.editing ? `Edit tool "${props.editing.name}"` : "New tool"}
       onClose={props.onClose}
       footer={

@@ -192,6 +192,7 @@ export function SkillEditorModal(props: {
   return (
     <Modal
       wide
+      dismissible={false}
       title={`Edit "${props.skill.name}"`}
       onClose={props.onClose}
       footer={
@@ -364,6 +365,7 @@ export function SkillWizard(props: { takenNames: string[]; onClose: () => void; 
   return (
     <Modal
       wide
+      dismissible={false}
       title="New skill"
       onClose={props.onClose}
       footer={

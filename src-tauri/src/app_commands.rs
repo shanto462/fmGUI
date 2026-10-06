@@ -16,6 +16,8 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String>
 pub async fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig) -> Result<AppConfig, String> {
     config.save(&state.paths.config_file)?;
     *state.config.write().unwrap() = config.clone();
+    // Stop MCP servers that were removed from the config.
+    state.mcp.prune(&config.mcp_servers).await;
     let _ = app.emit("config-changed", &config);
     Ok(config)
 }

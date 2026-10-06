@@ -16,22 +16,23 @@
   --text-xl: 20px;
   --text-2xl: 26px;
 
-  /* System colors */
-  --accent: -apple-system-control-accent;
+  /* System colors. Plain values here; WebKit (the real app) swaps in the live
+     macOS colors below, so the accent follows System Settings. */
+  --accent: #0a84ff;
   --accent-text: #fff;
-  --label: -apple-system-label;
-  --label-2: -apple-system-secondary-label;
-  --label-3: -apple-system-tertiary-label;
-  --label-4: -apple-system-quaternary-label;
-  --separator: -apple-system-separator;
-  --red: -apple-system-red;
-  --orange: -apple-system-orange;
-  --yellow: -apple-system-yellow;
-  --green: -apple-system-green;
-  --teal: -apple-system-teal;
-  --blue: -apple-system-blue;
-  --purple: -apple-system-purple;
-  --pink: -apple-system-pink;
+  --label: rgba(0, 0, 0, 0.85);
+  --label-2: rgba(0, 0, 0, 0.55);
+  --label-3: rgba(0, 0, 0, 0.3);
+  --label-4: rgba(0, 0, 0, 0.12);
+  --separator: rgba(0, 0, 0, 0.1);
+  --red: #ff3b30;
+  --orange: #ff9500;
+  --yellow: #ffcc00;
+  --green: #28cd41;
+  --teal: #59adc4;
+  --blue: #007aff;
+  --purple: #af52de;
+  --pink: #ff2d55;
 
   /* Surfaces (light) */
   --window-bg: #f5f5f7;
@@ -82,6 +83,19 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    --label: rgba(255, 255, 255, 0.85);
+    --label-2: rgba(255, 255, 255, 0.55);
+    --label-3: rgba(255, 255, 255, 0.25);
+    --label-4: rgba(255, 255, 255, 0.1);
+    --separator: rgba(255, 255, 255, 0.1);
+    --red: #ff453a;
+    --orange: #ff9f0a;
+    --yellow: #ffd60a;
+    --green: #32d74b;
+    --teal: #6ac4dc;
+    --blue: #0a84ff;
+    --purple: #bf5af2;
+    --pink: #ff375f;
     --window-bg: #1c1c1e;
     --content-bg: #1e1e20;
     --sidebar-tint: rgba(0, 0, 0, 0.12);
@@ -100,5 +114,26 @@
     --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.1);
     --accent-soft: color-mix(in srgb, var(--accent) 24%, transparent);
     --accent-softer: color-mix(in srgb, var(--accent) 13%, transparent);
+  }
+}
+
+/* Live macOS colors (WKWebView only). They follow the accent color and
+   light/dark mode chosen in System Settings. */
+@supports (color: -apple-system-control-accent) {
+  :root {
+    --accent: -apple-system-control-accent;
+    --label: -apple-system-label;
+    --label-2: -apple-system-secondary-label;
+    --label-3: -apple-system-tertiary-label;
+    --label-4: -apple-system-quaternary-label;
+    --separator: -apple-system-separator;
+    --red: -apple-system-red;
+    --orange: -apple-system-orange;
+    --yellow: -apple-system-yellow;
+    --green: -apple-system-green;
+    --teal: -apple-system-teal;
+    --blue: -apple-system-blue;
+    --purple: -apple-system-purple;
+    --pink: -apple-system-pink;
   }
 }

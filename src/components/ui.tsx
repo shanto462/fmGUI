@@ -266,7 +266,14 @@ export function CommandPreview(props: { command: string }) {
 }
 
 // ---------- Wizard steps ----------
-export function Steps(props: { steps: string[]; current: number }) {
+export function Steps(props: {
+  steps: string[];
+  current: number;
+  /** Makes steps clickable. Steps after `maxReachable` stay disabled. */
+  onSelect?: (index: number) => void;
+  maxReachable?: number;
+}) {
+  const reachable = (i: number) => !!props.onSelect && i <= (props.maxReachable ?? props.current);
   return (
     <div className="steps">
       {props.steps.map((s, i) => (
@@ -278,6 +285,9 @@ export function Steps(props: { steps: string[]; current: number }) {
               i === props.current && "steps__item--active",
               i < props.current && "steps__item--done",
             )}
+            role={reachable(i) ? "button" : undefined}
+            style={reachable(i) && i !== props.current ? { cursor: "pointer" } : undefined}
+            onClick={reachable(i) ? () => props.onSelect!(i) : undefined}
           >
             <span className="steps__num">{i < props.current ? <Check size={11} /> : i + 1}</span>
             {s}
@@ -294,15 +304,22 @@ export function Modal(props: {
   onClose: () => void;
   footer?: ReactNode;
   wide?: boolean;
+  /** Set false for wizards, so Escape or a stray click does not lose a half-filled form. */
+  dismissible?: boolean;
   children: ReactNode;
 }) {
+  const dismissible = props.dismissible !== false;
   useEffect(() => {
+    if (!dismissible) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && props.onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [props.onClose]);
+  }, [props.onClose, dismissible]);
   return createPortal(
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
+    <div
+      className="modal-backdrop"
+      onMouseDown={(e) => dismissible && e.target === e.currentTarget && props.onClose()}
+    >
       <div className={cx("modal", props.wide && "modal--wide")} role="dialog" aria-modal>
         <div className="modal__header row">
           <h2 className="modal__title">{props.title}</h2>

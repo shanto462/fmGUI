@@ -37,11 +37,16 @@ pub fn run() {
                         eprintln!("public server: autostart failed: {err}");
                     }
                 }
-                for server in cfg.mcp_servers.iter().filter(|s| s.enabled) {
-                    if let Err(err) = state.mcp.connect(&handle, server).await {
-                        eprintln!("mcp: {} failed to connect: {err}", server.name);
+                // In parallel: a first `npx -y` start can take up to a minute per server.
+                let connects = cfg.mcp_servers.iter().filter(|s| s.enabled).map(|server| {
+                    let (state, handle) = (&state, &handle);
+                    async move {
+                        if let Err(err) = state.mcp.connect(handle, server).await {
+                            eprintln!("mcp: {} failed to connect: {err}", server.name);
+                        }
                     }
-                }
+                });
+                futures_util::future::join_all(connects).await;
             });
             Ok(())
         })

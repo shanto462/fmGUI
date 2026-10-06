@@ -669,6 +669,7 @@ export function McpWizard(props: {
   return (
     <Modal
       wide
+      dismissible={false}
       title={editing ? `Edit "${editing.name}"` : "Add MCP server"}
       onClose={props.onClose}
       footer={

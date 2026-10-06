@@ -1,7 +1,7 @@
 // Setup Guide: a step-by-step wizard for first launch. OWNER: agent "ui-shell".
 
 import { ArrowLeft, ArrowRight, MessageSquare } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Page, Steps } from "../components/ui";
 import { useApp } from "../lib/store";
 import { useEngine } from "./overview/shared";
@@ -32,7 +32,6 @@ export default function SetupView() {
   const [furthest, setFurthest] = useState(0);
   const [finishing, setFinishing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const stepsRef = useRef<HTMLDivElement>(null);
 
   // A check that must pass before "Continue" is enabled.
   const gates: Record<number, { ok: boolean; why: string }> = {
@@ -57,14 +56,6 @@ export default function SetupView() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [current, refreshStatus]);
-
-  // The shared Steps bar has no click handler, so find the clicked item here.
-  const onStepsClick = (e: MouseEvent<HTMLDivElement>) => {
-    const item = (e.target as HTMLElement).closest(".steps__item");
-    if (!item || !stepsRef.current) return;
-    const index = Array.from(stepsRef.current.querySelectorAll(".steps__item")).indexOf(item);
-    if (index >= 0 && index <= furthest) go(index);
-  };
 
   const finish = async (route: "overview" | "chat") => {
     setFinishing(true);
@@ -104,9 +95,9 @@ export default function SetupView() {
   return (
     <Page title="Setup Guide" subtitle={`Step ${current + 1} of ${STEPS.length}: ${STEPS[current]}`} flush>
       <div className="setup">
-        <div className="setup-top" ref={stepsRef} onClick={onStepsClick} title="Click a step you have seen to go back to it">
+        <div className="setup-top" title="Click a step you have seen to go back to it">
           <div className="setup-top__inner">
-            <Steps steps={STEPS} current={current} />
+            <Steps steps={STEPS} current={current} onSelect={go} maxReachable={furthest} />
           </div>
         </div>
 
