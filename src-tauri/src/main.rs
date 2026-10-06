@@ -1,5 +1,4 @@
-// Prevents additional console window on Windows in release, DO NOT REMOVE!!
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+//! fmGUI runs only on macOS 27 or later (it needs /usr/bin/fm).
 
 fn main() {
     fmgui_lib::run()

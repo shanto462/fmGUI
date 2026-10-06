@@ -1,0 +1,3 @@
+# fmGUI targets macOS 27 or later only (Apple Silicon, /usr/bin/fm).
+[env]
+MACOSX_DEPLOYMENT_TARGET = "27.0"

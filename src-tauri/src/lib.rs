@@ -10,10 +10,12 @@ pub mod skills;
 pub mod state;
 pub mod util;
 
+#[cfg(not(target_os = "macos"))]
+compile_error!("fmGUI only supports macOS 27 or later: it drives Apple's /usr/bin/fm.");
+
 use state::{AppState, Paths};
 use tauri::{Manager, RunEvent};
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
